@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DeepGravity // Sovereign IDE</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <!-- Background Ambient Gradients -->
+    <div class="ambient-glow bg-cyan"></div>
+    <div class="ambient-glow bg-purple"></div>
+
+    <div class="app-container">
+        <!-- Top Status Bar -->
+        <header class="main-header">
+            <div class="brand">
+                <span class="logo-text">DEEP<span class="highlight">GRAVITY</span></span>
+                <span class="version-tag">v0.1.0-sovereign</span>
+            </div>
+            <div class="model-status">
+                <span class="status-indicator live"></span>
+                <span class="status-label">Rig Connected</span>
+                <select id="engine-selector" class="model-badge-select">
+                    <option value="">Loading...</option>
+                </select>
+            </div>
+        </header>
+
+        <!-- Main Workspace -->
+        <div class="workspace-grid">
+            <!-- Activity Bar (Leftmost switcher) -->
+            <div class="activity-bar">
+                <div class="activity-top">
+                    <button class="activity-btn active" id="btn-nav-explorer" title="Explorer">
+                        <svg class="icon" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+                    </button>
+                    <button class="activity-btn" id="btn-nav-extensions" title="Extensions">
+                        <svg class="icon" viewBox="0 0 24 24"><path d="M4 8h4V4H4v4zm6 12h4v-4h-4v4zm-6 0h4v-4H4v4zm0-6h4v-4H4v4zm6-6h4V4h-4v4zm6-4v4h-4V4h4zm-6 6h4v-4h-4v4zm6 6h4v-4h-4v4zm0 6h4v-4h-4v4z"/></svg>
+                    </button>
+                </div>
+                <div class="activity-bottom">
+                    <button class="activity-btn" id="btn-nav-settings" title="Settings">
+                        <svg class="icon" viewBox="0 0 24 24"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Pane 1: Sidebar (Explorer / Extensions) -->
+            <aside class="sidebar-pane">
+                <div class="sidebar-panel active" id="panel-explorer">
+                    <div class="pane-header">
+                        <svg class="icon" viewBox="0 0 24 24"><path d="M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z"/></svg>
+                        <h2>Workspace Tree</h2>
+                        <button class="btn-icon" id="refresh-tree-btn" title="Refresh Workspace">
+                            <svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+                        </button>
+                    </div>
+                    <div class="file-tree-container" id="file-tree">
+                        <div class="loading-spinner">Loading workspace...</div>
+                    </div>
+                </div>
+
+                <div class="sidebar-panel" id="panel-extensions">
+                    <div class="pane-header">
+                        <svg class="icon" viewBox="0 0 24 24"><path d="M4 8h4V4H4v4zm6 12h4v-4h-4v4zm-6 0h4v-4H4v4zm0-6h4v-4H4v4zm6-6h4V4h-4v4zm6-4v4h-4V4h4zm-6 6h4v-4h-4v4zm6 6h4v-4h-4v4zm0 6h4v-4h-4v4z"/></svg>
+                        <h2>Extensions</h2>
+                    </div>
+                    <div class="extensions-container">
+                        <div class="extensions-search-bar">
+                            <input type="text" id="extensions-search" placeholder="Search installed..." spellcheck="false" autocomplete="off" />
+                        </div>
+                        <div class="extensions-list" id="extensions-list">
+                            <div class="loading-spinner">Loading extensions...</div>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- Pane 2: Editor / Code View / Console -->
+            <main class="content-pane editor-pane-container">
+                <!-- Top Editor Section -->
+                <div class="editor-section">
+                    <div class="pane-header editor-header">
+                        <div class="active-file-info">
+                            <svg class="icon file-icon" viewBox="0 0 24 24"><path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 1.99 2H18c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z"/></svg>
+                            <span id="active-file-name">Select a file to edit</span>
+                        </div>
+                        <div class="editor-actions">
+                            <button class="btn btn-secondary btn-sm" id="btn-toggle-wrap" title="Toggle Word Wrap">
+                                Wrap
+                            </button>
+                            <button class="btn btn-secondary btn-sm" id="btn-save-file" disabled>
+                                Save File (Ctrl+S)
+                            </button>
+                        </div>
+                    </div>
+                    <div class="editor-container">
+                        <div class="line-numbers" id="editor-line-numbers"></div>
+                        <textarea id="code-textarea" placeholder="// Sovereign Workspace Editor" disabled spellcheck="false"></textarea>
+                    </div>
+                </div>
+
+                <!-- Split Handle -->
+                <div class="split-handle-horizontal" id="split-handle-h"></div>
+
+                <!-- Bottom Console Panel Section -->
+                <div class="console-section" id="bottom-console-pane">
+                    <div class="console-tabs-header">
+                        <div class="console-tabs">
+                            <button class="console-tab active" data-tab="tab-terminal">Terminal</button>
+                            <button class="console-tab" data-tab="tab-logs">Live Logs</button>
+                            <button class="console-tab" data-tab="tab-context">System Context</button>
+                            <button class="console-tab" data-tab="tab-tasks">Processes</button>
+                        </div>
+                        <div class="console-actions">
+                            <button class="btn-icon" id="clear-console-btn" title="Clear Console">
+                                <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M15 16h4v2h-4zm0-8h7v2h-7zm0 4h6v2h-6zM3 18c0 1.1.9 2 2 2h6c1.1 0 2-.9 2-2V8H3v10zm2-8h6v8H5v-8zm5-6H6L5 5H2v2h12V5h-3z"/></svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="console-tab-body">
+                        <!-- Tab 1: Terminal -->
+                        <div class="console-tab-content active" id="tab-terminal">
+                            <div class="terminal-output" id="terminal-stdout">
+                                <div>DeepGravity Sovereign Terminal ready. Run PowerShell commands here. All writes/commands trigger safety popups.</div>
+                            </div>
+                            <div class="terminal-input-bar">
+                                <span class="terminal-prompt">&gt;</span>
+                                <input type="text" id="terminal-input" placeholder="Type command and press Enter..." spellcheck="false" autocomplete="off" />
+                            </div>
+                        </div>
+
+                        <!-- Tab 2: Live Server Logs -->
+                        <div class="console-tab-content" id="tab-logs">
+                            <div class="logs-output" id="logs-container">
+                                <div>Tailing local IDE server activity logs...</div>
+                            </div>
+                        </div>
+
+                        <!-- Tab 3: System Context Inspector -->
+                        <div class="console-tab-content" id="tab-context">
+                            <pre class="context-output" id="context-inspector-pre">Loading hydrated system context prompt from server...</pre>
+                        </div>
+
+                        <!-- Tab 4: Background Processes -->
+                        <div class="console-tab-content" id="tab-tasks">
+                            <div class="tasks-table-container">
+                                <table class="tasks-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Task ID</th>
+                                            <th>Command</th>
+                                            <th>Started</th>
+                                            <th>Status</th>
+                                            <th>Action</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="tasks-table-body">
+                                        <tr><td colspan="5" class="loading-spinner">Loading running processes...</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </main>
+
+            <!-- Pane 3: Chat Sidebar -->
+            <aside class="sidebar-pane chat-pane">
+                <div class="pane-header chat-header">
+                    <svg class="icon" viewBox="0 0 24 24"><path d="M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 9h12v2H6V9zm8 5H6v-2h8v2zm4-6H6V6h12v2z"/></svg>
+                    <h2>Dora Brandon</h2>
+                    <button class="btn-icon" id="btn-toggle-history" title="Chat History">
+                        <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H5c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.01 21 12 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.28 2.54.72-1.21-3.5-2.08V8H12z"/></svg>
+                    </button>
+                </div>
+                
+                <!-- Chat History Drawer -->
+                <div class="chat-history-drawer" id="chat-history-drawer">
+                    <div class="drawer-header">
+                        <h3>Chat History</h3>
+                        <button class="btn btn-secondary btn-sm" id="btn-new-chat">New Chat</button>
+                    </div>
+                    <div class="history-list" id="history-list">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+                
+                <div class="chat-messages-container" id="chat-messages">
+                    <div class="system-welcome-card">
+                        <div class="somatic-pulse"></div>
+                        <h3>Attunement Core Active</h3>
+                        <p>Wired natively into the local 14B rig. Tracking threads with warmth and torque.</p>
+                    </div>
+                </div>
+
+                <!-- Stop execution button (hidden by default) -->
+                <div class="stop-bar" id="stop-bar" style="display: none;">
+                    <button id="stop-execution-btn" class="btn btn-danger btn-sm">
+                        <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor"><path d="M6 6h12v12H6z"/></svg>
+                        Stop Execution
+                    </button>
+                </div>
+
+                <!-- Input box -->
+                <div class="chat-input-bar">
+                    <textarea id="chat-input" placeholder="Type a message... (Shift+Enter for newline)" rows="1"></textarea>
+                    <button id="chat-send-btn" title="Send message">
+                        <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+                    </button>
+                </div>
+            </aside>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div class="portal-overlay" id="settings-portal">
+        <div class="portal-card settings-card">
+            <div class="portal-header settings-header">
+                <div class="warning-badge settings-badge">
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54c-.04-.24-.24-.41-.48-.41h-3.84c-.24 0-.43.17-.47.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.74 8.87c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.09.63-.09.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.03.7 1.62.94l.36 2.54c.05.24.24.41.48.41h3.84c.24 0 .44-.17.47-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.01-1.58zM12 15.6c-1.98 0-3.6-1.62-3.6-3.6s1.62-3.6 3.6-3.6 3.6 1.62 3.6 3.6-1.62 3.6-3.6 3.6z"/></svg>
+                    <span>CONFIGURATION</span>
+                </div>
+                <div class="sub-alert">Sovereign Engine & Workspace Settings</div>
+            </div>
+            
+            <div class="portal-body settings-body">
+                <!-- Server Location -->
+                <div class="settings-section">
+                    <div class="settings-section-title">Server Location</div>
+                    <div class="settings-field">
+                        <label>Base URL</label>
+                        <input type="text" id="settings-server-location" class="settings-input" placeholder="http://localhost:11434/v1" />
+                    </div>
+                </div>
+
+                <!-- Routing -->
+                <div class="settings-section">
+                    <div class="settings-section-title">Routing</div>
+                    <div class="settings-field-row">
+                        <div class="settings-field">
+                            <label>Attunement Core</label>
+                            <select id="settings-attunement" class="settings-select"></select>
+                        </div>
+                        <div class="settings-field">
+                            <label>Primary Orchestrator</label>
+                            <select id="settings-orchestrator" class="settings-select"></select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Providers -->
+                <div class="settings-section">
+                    <div class="settings-section-title">Providers</div>
+                    <div id="settings-providers-list" class="settings-providers-list"></div>
+                    <button class="btn btn-secondary btn-sm" id="settings-add-provider">+ Add Provider</button>
+                </div>
+
+                <!-- Workspace -->
+                <div class="settings-section">
+                    <div class="settings-section-title">Workspace</div>
+                    <div class="settings-field">
+                        <label>Root Path</label>
+                        <input type="text" id="settings-root-path" class="settings-input" />
+                    </div>
+                    <div class="settings-field">
+                        <label>Backup Path</label>
+                        <input type="text" id="settings-backup-path" class="settings-input" />
+                    </div>
+                </div>
+            </div>
+            
+            <div class="portal-footer settings-footer">
+                <button class="btn btn-secondary" id="settings-close-btn">Cancel</button>
+                <button class="btn btn-success" id="settings-save-btn">Save & Reload</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Safe Deployment Protocol Portal overlay -->
+    <div class="portal-overlay" id="safety-portal">
+        <div class="portal-card">
+            <div class="portal-header">
+                <div class="warning-badge">
+                    <svg class="icon icon-alert" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+                    <span>SAFE DEPLOYMENT PROTOCOL</span>
+                </div>
+                <div class="sub-alert">Interactive Verification Required</div>
+            </div>
+            
+            <div class="portal-body">
+                <div class="meta-row">
+                    <span class="label">Action Type:</span>
+                    <span class="value highlight-text" id="safety-action">Write File</span>
+                </div>
+                <div class="meta-row">
+                    <span class="label">Target Detail:</span>
+                    <span class="value" id="safety-target">src/orchestrator.py</span>
+                </div>
+                
+                <!-- Diff or Code display container -->
+                <div class="diff-container-outer">
+                    <pre class="diff-pre" id="safety-diff-content"></pre>
+                </div>
+            </div>
+            
+            <div class="portal-footer">
+                <button class="btn btn-danger" id="safety-deny-btn">Deny Execution (N)</button>
+                <button class="btn btn-success" id="safety-approve-btn">Approve & Execute (Y)</button>
+            </div>
+        </div>
+    </div>
+    
+    <script src="/static/app.js"></script>
+</body>
+</html>

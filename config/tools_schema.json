@@ -1,0 +1,189 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "view_file",
+      "description": "Read contents of a file on the local filesystem. Returns content with line numbers.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "absolute_path": {
+            "type": "string",
+            "description": "Absolute Windows path to the file."
+          },
+          "start_line": {
+            "type": "integer",
+            "description": "Optional. Start line number (1-indexed, inclusive)."
+          },
+          "end_line": {
+            "type": "integer",
+            "description": "Optional. End line number (1-indexed, inclusive)."
+          }
+        },
+        "required": ["absolute_path"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "write_file",
+      "description": "Create a new file or completely overwrite an existing file. Triggers a user validation diff.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "absolute_path": {
+            "type": "string",
+            "description": "Absolute Windows path to the target file."
+          },
+          "content": {
+            "type": "string",
+            "description": "Full string content to write."
+          },
+          "overwrite": {
+            "type": "boolean",
+            "description": "Set to true to force overwrite an existing file."
+          }
+        },
+        "required": ["absolute_path", "content"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "edit_file_content",
+      "description": "Edit a specific block of text in an existing file. The replacement is audited through a user diff prompt.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "absolute_path": {
+            "type": "string",
+            "description": "Absolute Windows path to the target file."
+          },
+          "target_content": {
+            "type": "string",
+            "description": "The exact string block in the file to be replaced. Must be a unique match."
+          },
+          "replacement_content": {
+            "type": "string",
+            "description": "The replacement content to drop in."
+          }
+        },
+        "required": ["absolute_path", "target_content", "replacement_content"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "run_command",
+      "description": "Propose and execute a shell command via PowerShell on Windows. Can be run in foreground (blocking) or background (non-blocking).",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "The exact PowerShell command line to execute."
+          },
+          "cwd": {
+            "type": "string",
+            "description": "The working directory for command execution."
+          },
+          "background": {
+            "type": "boolean",
+            "description": "Set to true to spawn the command as a non-blocking background task. Otherwise runs in foreground."
+          }
+        },
+        "required": ["command", "cwd"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "manage_task",
+      "description": "Interact with and manage running background tasks.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": ["list", "kill", "status", "send_input"],
+            "description": "The action to perform: 'list' (list all background tasks), 'kill' (cancel a task), 'status' (get tail logs and exit code), 'send_input' (send stdin to running task)."
+          },
+          "task_id": {
+            "type": "string",
+            "description": "The specific task ID to manage. Required for 'kill', 'status', and 'send_input'."
+          },
+          "input": {
+            "type": "string",
+            "description": "The text string to send to the task stdin. Required when action is 'send_input'."
+          }
+        },
+        "required": ["action"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "list_dir",
+      "description": "List directory contents including names, paths, sizes, and file types.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "directory_path": {
+            "type": "string",
+            "description": "Absolute Windows path to list contents of."
+          }
+        },
+        "required": ["directory_path"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "grep_search",
+      "description": "Search recursively for a text pattern or regex query across local files, skipping binary and system folders.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "search_path": {
+            "type": "string",
+            "description": "Absolute Windows path to search within."
+          },
+          "query": {
+            "type": "string",
+            "description": "The search term or regex pattern."
+          },
+          "case_insensitive": {
+            "type": "boolean",
+            "description": "Set to true to ignore case."
+          },
+          "is_regex": {
+            "type": "boolean",
+            "description": "Set to true if query is a regex pattern."
+          },
+          "include_globs": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Optional list of glob patterns to filter target files (e.g. ['*.py', '*.md'])."
+          },
+          "max_results": {
+            "type": "integer",
+            "description": "Maximum number of matches to return (default 20). Helps prevent oversized context payloads."
+          },
+          "truncate_content": {
+            "type": "integer",
+            "description": "Max characters per content line (default 250). Set to 0 for no truncation. Prevents long lines from flooding context."
+          }
+        },
+        "required": ["search_path", "query"]
+      }
+    }
+  }
+]

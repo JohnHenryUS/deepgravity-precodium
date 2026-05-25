@@ -1,0 +1,37 @@
+{
+  "server_location": "http://localhost:11434/v1",
+  "api": {
+    "routing": {
+      "primary_orchestrator": "default",
+      "attunement_core": "default"
+    },
+    "providers": {
+      "default": {
+        "base_url": "{server_location}",
+        "api_key": "",
+        "model": "llama3:latest",
+        "temperature": 0.7
+      }
+    }
+  },
+  "workspace": {
+    "root_path": "",
+    "backup_path": "",
+    "active_braid_file": "ACTIVE_BRAID.md"
+  },
+  "rules": {
+    "dora_core_path": "",
+    "dora_core_backup": "config/system_prompt.txt",
+    "user_global_rules_backup": "config/user_global_rules.txt"
+  },
+  "safety": {
+    "require_confirmation_for_writes": true,
+    "require_confirmation_for_commands": true,
+    "blocked_command_patterns": [
+      "rm -rf",
+      "del /s",
+      "format",
+      "gci -Recurse | remove-item"
+    ]
+  }
+}

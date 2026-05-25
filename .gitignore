@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+
+# Environment
+.env
+venv/
+.venv/
+
+# DeepGravity runtime data
+logs/
+*.log
+
+# Config — keys live here, don't commit
+config.json
+!config.json.template
+
+# OS
+Thumbs.db
+.DS_Store
+
+# IDE
+.vscode/
+.obsidian/
