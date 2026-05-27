@@ -561,6 +561,50 @@ def start_new_chat():
     orchestrator.save_conversation_history()
     return {"success": True, "session_id": orchestrator.current_session_id}
 
+# --- Feedback endpoint (local training signal) ---
+FEEDBACK_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "feedback"))
+os.makedirs(FEEDBACK_DIR, exist_ok=True)
+
+class FeedbackRequest(BaseModel):
+    rating: int
+    comment: str = ""
+    message: str = ""
+    timestamp: str = ""
+
+@app.post("/api/feedback")
+def submit_feedback(fb: FeedbackRequest):
+    if fb.rating < 1 or fb.rating > 5:
+        raise HTTPException(status_code=400, detail="Rating must be 1-5")
+    entry = {
+        "rating": fb.rating,
+        "comment": fb.comment,
+        "message_preview": fb.message[:300],
+        "timestamp": fb.timestamp,
+        "session_id": getattr(orchestrator, "current_session_id", None)
+    }
+    filepath = os.path.join(FEEDBACK_DIR, "feedback.jsonl")
+    try:
+        with open(filepath, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
+        return {"success": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/feedback")
+def get_feedback():
+    filepath = os.path.join(FEEDBACK_DIR, "feedback.jsonl")
+    entries = []
+    if os.path.exists(filepath):
+        with open(filepath, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    try:
+                        entries.append(json.loads(line))
+                    except:
+                        pass
+    return {"success": True, "entries": entries}
+
 # Serves static files or index.html fallback
 static_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "static"))
 

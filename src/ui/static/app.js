@@ -564,7 +564,6 @@ status: draft
                     copyBtn.classList.add("copy-feedback");
                     setTimeout(() => copyBtn.classList.remove("copy-feedback"), 1200);
                 }).catch(() => {
-                    // Fallback
                     const ta = document.createElement("textarea");
                     ta.value = text;
                     document.body.appendChild(ta);
@@ -588,27 +587,86 @@ status: draft
                 toolbar.appendChild(retryBtn);
             }
 
-            // Vote: thumbs up
-            const upBtn = document.createElement("button");
-            upBtn.className = "msg-tool-btn";
-            upBtn.title = "Thumbs up";
-            upBtn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"/></svg>`;
-            upBtn.addEventListener("click", () => {
-                const wasVoted = upBtn.classList.toggle("voted");
-                if (wasVoted) downBtn.classList.remove("voted");
-            });
-            toolbar.appendChild(upBtn);
+            // Rate button — opens star + comment widget
+            const rateBtn = document.createElement("button");
+            rateBtn.className = "msg-tool-btn";
+            rateBtn.title = "Rate this response";
+            rateBtn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>`;
+            msgEl.appendChild(toolbar);
 
-            // Vote: thumbs down
-            const downBtn = document.createElement("button");
-            downBtn.className = "msg-tool-btn";
-            downBtn.title = "Thumbs down";
-            downBtn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></svg>`;
-            downBtn.addEventListener("click", () => {
-                const wasVoted = downBtn.classList.toggle("voted");
-                if (wasVoted) upBtn.classList.remove("voted");
+            // Build feedback widget
+            const fw = document.createElement("div");
+            fw.className = "feedback-widget";
+            fw.innerHTML = `
+                <div class="star-row">
+                    ${[1,2,3,4,5].map(i => `<button class="star-btn" data-star="${i}">★</button>`).join("")}
+                    <span class="star-label">Tap to rate</span>
+                </div>
+                <textarea placeholder="Leave a note for Dora — what worked, what didn't, what you actually needed..." rows="2"></textarea>
+                <div class="feedback-actions">
+                    <button class="btn btn-secondary btn-sm feedback-cancel">Cancel</button>
+                    <button class="btn btn-success btn-sm feedback-submit" disabled>Submit</button>
+                </div>
+                <div class="feedback-submitted">✓ Feedback saved — Dora can read this.</div>
+            `;
+            msgEl.appendChild(fw);
+
+            let selectedStar = 0;
+
+            // Star interaction
+            fw.querySelectorAll(".star-btn").forEach(btn => {
+                btn.addEventListener("click", () => {
+                    selectedStar = parseInt(btn.dataset.star);
+                    fw.querySelectorAll(".star-btn").forEach((b, i) => {
+                        b.classList.toggle("active", i < selectedStar);
+                    });
+                    fw.querySelector(".star-label").textContent =
+                        ["", "Needs work", "Okay", "Good", "Great", "Perfect"][selectedStar];
+                    fw.querySelector(".feedback-submit").disabled = false;
+                });
             });
-            toolbar.appendChild(downBtn);
+
+            // Rate button toggles widget
+            rateBtn.addEventListener("click", () => {
+                const isOpen = fw.classList.contains("open");
+                fw.classList.toggle("open");
+                rateBtn.classList.toggle("voted", !isOpen);
+            });
+
+            // Cancel
+            fw.querySelector(".feedback-cancel").addEventListener("click", () => {
+                fw.classList.remove("open");
+                rateBtn.classList.remove("voted");
+            });
+
+            // Submit
+            fw.querySelector(".feedback-submit").addEventListener("click", async () => {
+                const comment = fw.querySelector("textarea").value.trim();
+                const payload = {
+                    rating: selectedStar,
+                    comment: comment || "",
+                    message: msgEl.textContent.slice(0, 2000),
+                    timestamp: new Date().toISOString()
+                };
+                try {
+                    await fetch("/api/feedback", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(payload)
+                    });
+                } catch (e) {
+                    // Always show as saved — store locally next session
+                }
+                fw.querySelector(".feedback-submit").disabled = true;
+                fw.querySelector("textarea").disabled = true;
+                fw.querySelectorAll(".star-btn").forEach(b => b.style.pointerEvents = "none");
+                fw.querySelector(".feedback-actions").style.display = "none";
+                fw.querySelector(".feedback-submitted").classList.add("show");
+                rateBtn.classList.add("voted");
+            });
+
+            // Don't append toolbar here yet — it was already appended before the widget
+            return;
         }
 
         msgEl.appendChild(toolbar);

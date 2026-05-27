@@ -682,6 +682,90 @@ body {
 .msg-tool-btn.copy-feedback {
     color: var(--accent-green);
 }
+
+/* Feedback Widget — Star Rating + Comment */
+.feedback-widget {
+    margin-top: 8px;
+    padding: 10px 12px;
+    background: hsla(224, 25%, 6%, 0.6);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    display: none;
+    flex-direction: column;
+    gap: 8px;
+}
+.feedback-widget.open {
+    display: flex;
+}
+.feedback-widget .star-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.feedback-widget .star-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 2px;
+    color: var(--text-muted);
+    transition: color 0.15s;
+    font-size: 1.3rem;
+    line-height: 1;
+}
+.feedback-widget .star-btn:hover,
+.feedback-widget .star-btn.active {
+    color: var(--accent-yellow);
+}
+.feedback-widget .star-btn svg {
+    width: 20px;
+    height: 20px;
+    fill: currentColor;
+}
+.feedback-widget .star-label {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-left: 6px;
+}
+.feedback-widget textarea {
+    background: var(--bg-active);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    color: var(--text-main);
+    font-family: var(--font-sans);
+    font-size: 0.8rem;
+    padding: 8px;
+    resize: vertical;
+    min-height: 50px;
+    outline: none;
+    transition: border-color 0.2s;
+}
+.feedback-widget textarea:focus {
+    border-color: var(--accent-cyan);
+}
+.feedback-widget textarea::placeholder {
+    color: var(--text-muted);
+    font-style: italic;
+}
+.feedback-actions {
+    display: flex;
+    gap: 6px;
+    justify-content: flex-end;
+}
+.feedback-actions .btn {
+    font-size: 0.75rem;
+    padding: 4px 10px;
+}
+.feedback-submitted {
+    font-size: 0.75rem;
+    color: var(--accent-green);
+    display: none;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 0;
+}
+.feedback-submitted.show {
+    display: flex;
+}
 .message.user {
     align-self: flex-end;
     background: var(--accent-purple-dim);
