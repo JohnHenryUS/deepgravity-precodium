@@ -203,19 +203,7 @@ body {
     flex-grow: 1;
 }
 
-.pane-header-actions {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-    margin-left: auto;
-}
-
-/* Scroll synced preview for .markdown-preview */
-.editor-container .markdown-preview {
-    overflow-y: auto;
-}
-
-/* Buttons */
+/* SVGs & Icons */
 .icon {
     width: 18px;
     height: 18px;
@@ -349,18 +337,11 @@ body {
     text-align: right;
     font-family: var(--font-mono);
     font-size: 0.85rem;
-    line-height: 1.5;
     color: var(--text-muted);
     border-right: 1px solid var(--border-color);
     background: hsla(224, 25%, 4%, 0.5);
     user-select: none;
     overflow-y: hidden;
-}
-
-.line-numbers div {
-    line-height: 1.5;
-    height: calc(1.5em);
-    font-size: 0.85rem;
 }
 
 #code-textarea {
@@ -382,120 +363,6 @@ body {
 #code-textarea:disabled {
     color: var(--text-muted);
     cursor: not-allowed;
-}
-
-/* ── Editor Modes & Markdown Preview ── */
-.editor-section.preview-only #code-textarea,
-.editor-section.preview-only .line-numbers {
-    display: none;
-}
-
-.editor-section.preview-only .markdown-preview {
-    display: block;
-}
-
-.editor-section.edit-only .markdown-preview {
-    display: none;
-}
-
-.editor-section.split-view #code-textarea,
-.editor-section.split-view .line-numbers {
-    width: 50%;
-}
-
-.editor-section.split-view .markdown-preview {
-    display: block;
-    width: 50%;
-    border-left: 1px solid var(--border-color);
-}
-
-.markdown-preview {
-    display: none;
-    flex: 1;
-    padding: 12px 16px;
-    overflow-y: auto;
-    background: hsla(224, 25%, 4%, 0.2);
-    font-family: var(--font-main);
-    color: var(--text-main);
-    line-height: 1.6;
-}
-
-/* Rendered markdown typography */
-.markdown-preview h1 { font-size: 1.6rem; font-weight: 700; margin: 1em 0 0.5em; color: var(--accent-cyan); border-bottom: 1px solid var(--border-color); padding-bottom: 0.3em; }
-.markdown-preview h2 { font-size: 1.3rem; font-weight: 600; margin: 1em 0 0.4em; color: var(--accent-blue); }
-.markdown-preview h3 { font-size: 1.1rem; font-weight: 600; margin: 0.8em 0 0.3em; color: var(--text-bright); }
-.markdown-preview h4 { font-size: 1rem; font-weight: 600; margin: 0.6em 0 0.2em; }
-.markdown-preview p { margin: 0.5em 0; }
-.markdown-preview strong { color: var(--text-bright); font-weight: 600; }
-.markdown-preview em { font-style: italic; }
-.markdown-preview code {
-    font-family: var(--font-mono);
-    font-size: 0.85rem;
-    background: hsla(224, 25%, 20%, 0.4);
-    padding: 1px 5px;
-    border-radius: 3px;
-    color: var(--accent-green);
-}
-.markdown-preview pre {
-    background: hsla(224, 25%, 8%, 0.6);
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
-    padding: 12px;
-    overflow-x: auto;
-    margin: 0.8em 0;
-}
-.markdown-preview pre code {
-    background: none;
-    padding: 0;
-    color: var(--text-main);
-    line-height: 1.5;
-}
-.markdown-preview blockquote {
-    border-left: 3px solid var(--accent-purple);
-    padding: 4px 12px;
-    margin: 0.8em 0;
-    color: var(--text-muted);
-    background: hsla(270, 50%, 30%, 0.08);
-    border-radius: 0 4px 4px 0;
-}
-.markdown-preview ul, .markdown-preview ol {
-    padding-left: 1.5em;
-    margin: 0.5em 0;
-}
-.markdown-preview li { margin: 0.2em 0; }
-.markdown-preview table {
-    border-collapse: collapse;
-    width: 100%;
-    margin: 0.8em 0;
-    font-size: 0.9rem;
-}
-.markdown-preview th, .markdown-preview td {
-    border: 1px solid var(--border-color);
-    padding: 6px 10px;
-    text-align: left;
-}
-.markdown-preview th {
-    background: hsla(224, 25%, 15%, 0.5);
-    font-weight: 600;
-}
-.markdown-preview tr:nth-child(even) {
-    background: hsla(224, 25%, 10%, 0.3);
-}
-.markdown-preview a {
-    color: var(--accent-cyan);
-    text-decoration: underline;
-}
-.markdown-preview a:hover { color: var(--accent-blue); }
-.markdown-preview hr {
-    border: none;
-    border-top: 1px solid var(--border-color);
-    margin: 1.2em 0;
-}
-.markdown-preview img {
-    max-width: 100%;
-    border-radius: 6px;
-    border: 1px solid var(--border-color);
-    margin: 0.8em 0;
 }
 
 /* Buttons */

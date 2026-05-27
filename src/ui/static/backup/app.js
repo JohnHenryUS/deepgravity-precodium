@@ -21,10 +21,6 @@ document.addEventListener("DOMContentLoaded", () => {
     const safetyApproveBtn = document.getElementById("safety-approve-btn");
     const safetyDenyBtn = document.getElementById("safety-deny-btn");
     const engineSelector = document.getElementById("engine-selector");
-    const previewBtn = document.getElementById("btn-toggle-preview");
-    const markdownPreview = document.getElementById("markdown-preview");
-    const newDocBtn = document.getElementById("btn-new-doc");
-    const editorSection = document.querySelector(".editor-section");
 
     // Application State
     let activeFilePath = null;
@@ -33,7 +29,6 @@ document.addEventListener("DOMContentLoaded", () => {
     let currentAssistantBubble = null;
     let currentToolboxContainer = null;  // collapsed toolbox wrapper for tool cards per round
     let activeToolCards = {};
-    let previewMode = "edit-only";  // "edit-only" | "preview-only" | "split-view"
 
     // 1. File Explorer Operations
     async function loadWorkspaceTree() {
@@ -116,23 +111,6 @@ document.addEventListener("DOMContentLoaded", () => {
                 activeFileName.textContent = path;
                 saveFileBtn.disabled = true; // Unmodified initially
                 updateLineNumbers();
-                // Auto-switch to split preview for .md files
-                if (path.endsWith(".md")) {
-                    if (previewMode === "edit-only") {
-                        previewMode = "split-view";
-                        editorSection.classList.add("split-view");
-                        previewBtn.textContent = "Split";
-                        previewBtn.title = "Split view (Ctrl+Shift+P)";
-                    }
-                    updateMarkdownPreview();
-                } else {
-                    // Non-markdown: reset to edit-only
-                    previewMode = "edit-only";
-                    editorSection.classList.remove("preview-only", "split-view");
-                    previewBtn.textContent = "Preview";
-                    previewBtn.title = "Preview only available for .md files (Ctrl+Shift+P)";
-                    markdownPreview.innerHTML = '<div style="color: var(--text-muted); padding: 2em; text-align: center;">Open a .md file to see the rendered preview</div>';
-                }
             } else {
                 alert(`Error opening file: ${data.detail || "Access Denied"}`);
             }
@@ -161,147 +139,9 @@ document.addEventListener("DOMContentLoaded", () => {
         updateLineNumbers();
         // Toggle save button state based on modification check
         saveFileBtn.disabled = codeTextarea.value === originalFileContent;
-        // Update markdown preview if in a preview mode
-        if (previewMode !== "edit-only") {
-            updateMarkdownPreview();
-        }
     });
 
     codeTextarea.addEventListener("scroll", syncEditorScroll);
-
-    // ── Markdown Preview System ──
-    function updateMarkdownPreview() {
-        const text = codeTextarea.value;
-        if (!text || !activeFilePath || !activeFilePath.endsWith(".md")) {
-            markdownPreview.innerHTML = activeFilePath && activeFilePath.endsWith(".md")
-                ? '<div style="color: var(--text-muted); padding: 2em; text-align: center;">Rendering...</div>'
-                : '<div style="color: var(--text-muted); padding: 2em; text-align: center;">Open a .md file to see the rendered preview</div>';
-            return;
-        }
-        try {
-            // Use marked if available, fall back to simple renderer
-            if (typeof marked !== "undefined") {
-                marked.setOptions({
-                    breaks: true,
-                    gfm: true
-                });
-                markdownPreview.innerHTML = marked.parse(text);
-            } else {
-                // Fallback: basic rendering
-                let html = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-                html = html.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
-                html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-                html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
-                html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
-                html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
-                html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-                html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
-                html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
-                markdownPreview.innerHTML = html;
-            }
-        } catch (e) {
-            markdownPreview.innerHTML = `<div style="color: var(--accent-red); padding: 1em;">Preview error: ${e.message}</div>`;
-        }
-    }
-
-    function togglePreviewMode() {
-        if (!activeFilePath || !activeFilePath.endsWith(".md")) {
-            // Not a markdown file — cycle doesn't apply, but allow split for .md files only
-            if (previewMode !== "edit-only") {
-                previewMode = "edit-only";
-                editorSection.classList.remove("preview-only", "split-view");
-            }
-            previewBtn.textContent = "Preview";
-            previewBtn.title = "Preview only available for .md files (Ctrl+Shift+P)";
-            return;
-        }
-
-        // Cycle: edit-only -> split-view -> preview-only -> edit-only
-        if (previewMode === "edit-only") {
-            previewMode = "split-view";
-            editorSection.classList.remove("edit-only");
-            editorSection.classList.add("split-view");
-            previewBtn.textContent = "Split";
-            previewBtn.title = "Split view (Ctrl+Shift+P)";
-        } else if (previewMode === "split-view") {
-            previewMode = "preview-only";
-            editorSection.classList.remove("split-view");
-            editorSection.classList.add("preview-only");
-            previewBtn.textContent = "Edit";
-            previewBtn.title = "Edit only (Ctrl+Shift+P)";
-        } else {
-            previewMode = "edit-only";
-            editorSection.classList.remove("preview-only", "split-view");
-            editorSection.classList.add("edit-only");
-            previewBtn.textContent = "Preview";
-            previewBtn.title = "Show preview (Ctrl+Shift+P)";
-        }
-
-        // Ensure preview is rendered when switching to preview modes
-        if (previewMode !== "edit-only") {
-            updateMarkdownPreview();
-        }
-    }
-
-    // Wire preview toggle
-    if (previewBtn) {
-        previewBtn.addEventListener("click", togglePreviewMode);
-    }
-
-    // ── New Document Workflow ──
-    async function createNewMarkdownDoc() {
-        const name = prompt("New markdown document name:", "untitled.md");
-        if (!name) return;
-        const docName = name.endsWith(".md") ? name : name + ".md";
-
-        // Generate timestamped frontmatter
-        const now = new Date();
-        const timestamp = now.toISOString().replace("T", " ").substring(0, 19);
-        const title = docName.replace(/\.md$/, "").replace(/[-_]/g, " ");
-        const content = `---
-title: "${title}"
-created: ${timestamp}
-status: draft
----
-
-# ${title}
-
-`;
-
-        try {
-            const resp = await fetch("/api/files/write", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    path: docName,
-                    content: content
-                })
-            });
-            const data = await resp.json();
-            if (data.success) {
-                showNotification(`Created ${docName}`, "success");
-                loadWorkspaceTree();
-                // Open the file in the editor
-                openFile(docName);
-            } else {
-                alert(`Error creating document: ${data.detail || "Unknown"}`);
-            }
-        } catch (err) {
-            alert(`Network error: ${err.message}`);
-        }
-    }
-
-    if (newDocBtn) {
-        newDocBtn.addEventListener("click", createNewMarkdownDoc);
-    }
-
-    // ── Keyboard Shortcut: Ctrl+Shift+P for preview toggle ──
-    window.addEventListener("keydown", (e) => {
-        if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === "p" || e.key === "P")) {
-            e.preventDefault();
-            if (previewBtn) togglePreviewMode();
-        }
-    });
 
     // Save File Operation
     async function saveActiveFile() {
@@ -548,38 +388,61 @@ status: draft
         loadWorkspaceTree(); // Automatically refresh file tree on session completion
     }
 
-    // Markdown renderer for assistant messages (uses marked if available)
+    // Simple markdown renderer for assistant messages
     function renderMarkdown(text) {
         if (!text) return "";
-        if (typeof marked !== "undefined") {
-            marked.setOptions({ breaks: true, gfm: true });
-            return marked.parse(text);
-        }
-        // Fallback: simple rendering if marked isn't loaded
-        let html = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        // Escape HTML first
+        let html = text
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/>/g, "&gt;");
+        
+        // Code blocks (fenced) - must come before inline code
         html = html.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
+        
+        // Inline code
         html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+        
+        // Bold and italic
         html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
         html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
         html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+        
+        // Links
         html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+        
+        // Blockquotes
         html = html.replace(/^&gt;\s?(.*)$/gm, '<blockquote>$1</blockquote>');
+        
+        // Headings
         html = html.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
         html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
         html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
         html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+        
+        // Unordered lists
         html = html.replace(/^[\*\-]\s(.+)$/gm, '<li>$1</li>');
         html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
+        
+        // Ordered lists
         html = html.replace(/^\d+\.\s(.+)$/gm, '<li>$1</li>');
         html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ol>$&</ol>');
+        
+        // Paragraphs - wrap remaining text in <p> tags
+        // Split by double newlines
         const paragraphs = html.split(/\n\n+/);
         html = paragraphs.map(p => {
             p = p.trim();
             if (!p) return "";
+            // Skip if already wrapped in block-level tags
             if (p.match(/^<(p|h[1-4]|ul|ol|li|blockquote|pre|div)/)) return p;
+            // Skip single lines that are list items or blockquotes
+            if (p.match(/^<(li|blockquote)/)) return p;
+            // Convert single newlines within paragraph to <br>
             p = p.replace(/\n/g, '<br>');
             return `<p>${p}</p>`;
         }).join("\n");
+        
         return html;
     }
 

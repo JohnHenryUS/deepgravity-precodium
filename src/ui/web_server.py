@@ -457,6 +457,68 @@ def get_system_context():
     orchestrator.hydrate_system_prompt()
     return {"context": orchestrator.system_prompt}
 
+# ── Contract Layer API (Phase 4.5.2) ──
+
+class ContractRequest(BaseModel):
+    description: str
+
+@app.post("/api/contract/parse")
+def parse_contract(req: ContractRequest):
+    """
+    Parse a natural language work request into a contract for user review.
+    Returns the formatted contract summary for display.
+    """
+    global orchestrator
+    contract = orchestrator.build_contract_from_request(req.description)
+    return {
+        "contract_summary": orchestrator.format_contract_for_approval(contract),
+        "description": contract.description,
+        "guardrails": {
+            "destructive_edits": contract.destructive_edit_policy.value,
+            "file_deletion": contract.file_deletion_policy.value,
+            "max_search_retries": contract.max_search_retries,
+            "spinning_detection": contract.spinning_enabled,
+            "watchdog_minutes": contract.watchdog_max_minutes,
+        }
+    }
+
+@app.post("/api/contract/activate")
+def activate_contract(req: ContractRequest):
+    """
+    Parse and activate a work contract from a natural language request.
+    """
+    global orchestrator
+    contract = orchestrator.build_contract_from_request(req.description)
+    orchestrator.set_contract(contract)
+    return {
+        "success": True,
+        "message": f"Contract activated. {orchestrator.get_contract_summary()}",
+        "contract": contract.description[:200]
+    }
+
+@app.post("/api/contract/clear")
+def clear_contract():
+    """Deactivate the current work contract."""
+    global orchestrator
+    orchestrator.clear_contract()
+    return {"success": True, "message": "Contract deactivated. Per-tool approval restored."}
+
+@app.get("/api/contract/status")
+def contract_status():
+    """Get the status of the current contract."""
+    global orchestrator
+    return {
+        "active": orchestrator.has_active_contract(),
+        "summary": orchestrator.get_contract_summary(),
+        "violations": orchestrator._contract_violation_buffer[-5:] if orchestrator._contract_violation_buffer else []
+    }
+
+@app.get("/api/contract/violations")
+def contract_violations():
+    """Get recent contract violations."""
+    global orchestrator
+    return {"violations": orchestrator._contract_violation_buffer[-20:]}
+
 @app.websocket("/ws/logs")
 async def websocket_logs(websocket: WebSocket):
     global active_log_websockets

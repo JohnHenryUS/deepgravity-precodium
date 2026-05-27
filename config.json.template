@@ -17,7 +17,8 @@
   "workspace": {
     "root_path": "",
     "backup_path": "",
-    "active_braid_file": "ACTIVE_BRAID.md"
+    "active_braid_file": "ACTIVE_BRAID.md",
+    "allowed_paths": []
   },
   "rules": {
     "dora_core_path": "",

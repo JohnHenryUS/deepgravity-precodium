@@ -8,6 +8,10 @@ from src.tools.shell import ShellCommandRunner
 from src.tools.search import SearchOperations
 from src.tools.task_manager import TaskManager
 from src.safety import SafetyGuardrails
+from src.contract import (
+    ContractMonitor, ContractViolation, WorkContract,
+    ContractParser, build_contract_from_request
+)
 
 class DeepGravityOrchestrator:
     """
@@ -40,6 +44,10 @@ class DeepGravityOrchestrator:
         self._heartbeat_path = os.path.join(os.path.dirname(config_path), "logs", "heartbeat.json")
         self._loop_count = 0
         self._last_tool_name = None
+        
+        # ── Contract Layer (Phase 4.5.2) ──
+        self.contract_monitor = ContractMonitor()
+        self._contract_violation_buffer: List[Dict[str, Any]] = []
         
         # Failover routing — per-provider error state
         self._provider_errors = {}  # {provider_name: {"consecutive": N, "last_failure": epoch_sec}}
@@ -198,6 +206,37 @@ class DeepGravityOrchestrator:
         self.current_session_id = f"chat_{time.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:4]}"
         self._write_heartbeat("initialized")
 
+    # ── Contract Layer Methods ──────────────────────────────────────
+
+    def set_contract(self, contract: WorkContract):
+        """Activate a work contract with guardrails."""
+        self.contract_monitor.set_contract(contract)
+        print(f"\n[DeepGravity] Contract activated: {contract.description[:80]}")
+        print(self.contract_monitor.get_contract_summary())
+        self._contract_violation_buffer.clear()
+
+    def clear_contract(self):
+        """Remove the active contract, falling back to per-tool approval."""
+        if self.contract_monitor.has_active_contract():
+            print("\n[DeepGravity] Contract deactivated. Returning to per-tool approval.")
+        self.contract_monitor.clear_contract()
+        self._contract_violation_buffer.clear()
+
+    def has_active_contract(self) -> bool:
+        return self.contract_monitor.has_active_contract()
+
+    def get_contract_summary(self) -> str:
+        return self.contract_monitor.get_contract_summary()
+
+    def build_contract_from_request(self, user_text: str) -> WorkContract:
+        """Parse natural language into a contract, using workspace root as allowed path."""
+        root = self.config.get("workspace", {}).get("root_path", "")
+        return build_contract_from_request(user_text, workspace_root=root)
+
+    def format_contract_for_approval(self, contract: WorkContract) -> str:
+        """Format contract for user review before activation."""
+        return ContractParser.format_contract_summary(contract)
+
     def execute_tool(self, name: str, args: Dict[str, Any]) -> str:
         """
         Routes and executes proposed tool actions, trapping exceptions.
@@ -205,11 +244,16 @@ class DeepGravityOrchestrator:
         print(f"\n[DeepGravity] Running tool call: {name} with arguments: {json.dumps(args)}")
         
         workspace_root = os.path.abspath(self.config.get("workspace", {}).get("root_path", ""))
+        allowed_paths = [workspace_root] + [
+            os.path.abspath(p) for p in self.config.get("workspace", {}).get("allowed_paths", []) if p
+        ]
         
         def validate_path(p: str) -> str:
             resolved = os.path.abspath(os.path.normpath(p))
-            if not resolved.startswith(workspace_root):
-                raise ValueError(f"Access Denied: Path '{p}' is outside the sovereign workspace boundary ({workspace_root}).")
+            for allowed in allowed_paths:
+                if resolved.startswith(allowed):
+                    return resolved
+            raise ValueError(f"Access Denied: Path '{p}' is outside the sovereign workspace boundary ({allowed_paths}).")
             return resolved
 
         try:
@@ -217,20 +261,35 @@ class DeepGravityOrchestrator:
             for key in ["absolute_path", "directory_path", "search_path"]:
                 if key in args:
                     args[key] = validate_path(args[key])
+            
+            # ── Contract Check ──
+            if self.contract_monitor.has_active_contract():
+                violation = self.contract_monitor.check_tool_call(name, args)
+                if violation is not None:
+                    self._contract_violation_buffer.append({
+                        "type": violation.violation_type,
+                        "message": str(violation),
+                        "tool": name,
+                        "args": args,
+                        "details": violation.details
+                    })
+                    return f"[CONTRACT VIOLATION] {violation.violation_type}: {violation}"
+            
+            # ── Execute Tool ──
             if name == "view_file":
-                return self.file_ops.view_file(
+                result = self.file_ops.view_file(
                     absolute_path=args["absolute_path"],
                     start_line=args.get("start_line"),
                     end_line=args.get("end_line")
                 )
             elif name == "write_file":
-                return self.file_ops.write_file(
+                result = self.file_ops.write_file(
                     absolute_path=args["absolute_path"],
                     content=args["content"],
                     overwrite=args.get("overwrite", False)
                 )
             elif name == "edit_file_content":
-                return self.file_ops.edit_file_content(
+                result = self.file_ops.edit_file_content(
                     absolute_path=args["absolute_path"],
                     target_content=args["target_content"],
                     replacement_content=args["replacement_content"]
@@ -240,15 +299,15 @@ class DeepGravityOrchestrator:
                 cwd = args["cwd"]
                 is_bg = args.get("background", False)
                 if is_bg:
-                    # Prompt for background command approval first
                     approved = self.guardrails.show_command_prompt(command, cwd)
                     if not approved:
-                        return "[-] Background command execution aborted by user."
-                    task_id = self.task_manager.start_task(command, cwd)
-                    return f"[+] Task spawned in background. Task ID: {task_id}. Live log tail: {self.task_manager.active_tasks[task_id]['log_file']}"
+                        result = "[-] Background command execution aborted by user."
+                    else:
+                        task_id = self.task_manager.start_task(command, cwd)
+                        result = f"[+] Task spawned in background. Task ID: {task_id}. Live log tail: {self.task_manager.active_tasks[task_id]['log_file']}"
                 else:
                     exit_code, output = self.shell_runner.run_command(command, cwd)
-                    return f"Exit Code: {exit_code}\nOutput:\n{output}"
+                    result = f"Exit Code: {exit_code}\nOutput:\n{output}"
             elif name == "manage_task":
                 action = args["action"]
                 task_id = args.get("task_id")
@@ -256,27 +315,30 @@ class DeepGravityOrchestrator:
                 
                 if action == "list":
                     tasks = self.task_manager.list_tasks()
-                    return json.dumps(tasks, indent=2)
+                    result = json.dumps(tasks, indent=2)
                 elif action == "status":
                     if not task_id:
-                        return "Error: task_id is required for 'status' action."
-                    status = self.task_manager.get_task_status(task_id)
-                    return json.dumps(status, indent=2)
+                        result = "Error: task_id is required for 'status' action."
+                    else:
+                        status = self.task_manager.get_task_status(task_id)
+                        result = json.dumps(status, indent=2)
                 elif action == "send_input":
                     if not task_id or not input_str:
-                        return "Error: task_id and input are required for 'send_input' action."
-                    return self.task_manager.send_input(task_id, input_str)
+                        result = "Error: task_id and input are required for 'send_input' action."
+                    else:
+                        result = self.task_manager.send_input(task_id, input_str)
                 elif action == "kill":
                     if not task_id:
-                        return "Error: task_id is required for 'kill' action."
-                    return self.task_manager.kill_task(task_id)
+                        result = "Error: task_id is required for 'kill' action."
+                    else:
+                        result = self.task_manager.kill_task(task_id)
                 else:
-                    return f"Error: Action '{action}' is not supported."
+                    result = f"Error: Action '{action}' is not supported."
             elif name == "list_dir":
                 items = self.search_ops.list_dir(directory_path=args["directory_path"])
-                return json.dumps(items, indent=2)
+                result = json.dumps(items, indent=2)
             elif name == "grep_search":
-                result = self.search_ops.grep_search(
+                grep_result = self.search_ops.grep_search(
                     search_path=args["search_path"],
                     query=args["query"],
                     case_insensitive=args.get("case_insensitive", True),
@@ -285,11 +347,18 @@ class DeepGravityOrchestrator:
                     max_results=args.get("max_results", 20),
                     truncate_content=args.get("truncate_content", 250)
                 )
-                return json.dumps(result, indent=2)
+                result = json.dumps(grep_result, indent=2)
             else:
-                return f"Error: Tool '{name}' is not recognized."
+                result = f"Error: Tool '{name}' is not recognized."
+            
+            # Record result for contract spinning detection
+            self.contract_monitor.record_result(name, args, result)
+            return result
+            
         except Exception as e:
-            return f"Error executing tool '{name}': {e}"
+            error_msg = f"Error executing tool '{name}': {e}"
+            self.contract_monitor.record_result(name, args, error_msg)
+            return error_msg
 
     def sanitize_conversation_history(self):
         """
@@ -481,6 +550,19 @@ class DeepGravityOrchestrator:
                     "content": tool_result
                 })
                 self.save_conversation_history()
+            
+            # ── Spinning Detection ──
+            if self.contract_monitor.has_active_contract():
+                spin_check = self.contract_monitor.check_spinning()
+                if spin_check is not None:
+                    spin_msg = f"[SPINNING DETECTED] {spin_check['message']}"
+                    print(f"\n[DeepGravity] {spin_msg}")
+                    self.conversation_history.append({
+                        "role": "assistant",
+                        "content": f"\n\n*{spin_msg}*\n\nI've paused because I detected I might be in a loop. Here's what I was doing:\n- Tool: `{spin_check['tool'] if 'tool' in spin_check else spin_check.get('type', 'unknown')}`\n- Issue: {spin_check['message']}\n\nPlease review and let me know how to proceed — adjust the plan, or let me continue.\n"
+                    })
+                    self.save_conversation_history()
+                    return self.conversation_history[-1]["content"]
 
     def run_agent_loop_stream(self, user_text: str) -> Generator[Dict[str, Any], None, None]:
         """
@@ -630,6 +712,20 @@ class DeepGravityOrchestrator:
                 self.save_conversation_history()
                 
                 yield {"type": "tool_end", "name": func["name"], "result": tool_result}
+                
+                # ── Spinning Detection (streaming) ──
+                if self.contract_monitor.has_active_contract():
+                    spin_check = self.contract_monitor.check_spinning()
+                    if spin_check is not None:
+                        spin_msg = f"[SPINNING DETECTED] {spin_check['message']}"
+                        print(f"\n[DeepGravity] {spin_msg}")
+                        self.conversation_history.append({
+                            "role": "assistant",
+                            "content": f"\n\n*{spin_msg}*\n\nPlease review and let me know how to proceed."
+                        })
+                        self.save_conversation_history()
+                        yield {"type": "spinning_detected", "message": spin_check['message'], "details": spin_check}
+                        return
 
     def get_credential(self, name: str) -> Optional[str]:
         """
