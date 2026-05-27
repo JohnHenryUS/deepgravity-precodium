@@ -121,8 +121,8 @@ document.addEventListener("DOMContentLoaded", () => {
                     if (previewMode === "edit-only") {
                         previewMode = "split-view";
                         editorSection.classList.add("split-view");
-                        previewBtn.textContent = "Split";
-                        previewBtn.title = "Split view (Ctrl+Shift+P)";
+                        previewBtn.textContent = "Full Preview";
+                        previewBtn.title = "Switch to full preview-only (Ctrl+Shift+P)";
                     }
                     updateMarkdownPreview();
                 } else {
@@ -217,24 +217,25 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         // Cycle: edit-only -> split-view -> preview-only -> edit-only
+        // Button always shows the NEXT mode you'll switch to
         if (previewMode === "edit-only") {
             previewMode = "split-view";
             editorSection.classList.remove("edit-only");
             editorSection.classList.add("split-view");
-            previewBtn.textContent = "Split";
-            previewBtn.title = "Split view (Ctrl+Shift+P)";
+            previewBtn.textContent = "Full Preview";
+            previewBtn.title = "Switch to full preview-only (Ctrl+Shift+P)";
         } else if (previewMode === "split-view") {
             previewMode = "preview-only";
             editorSection.classList.remove("split-view");
             editorSection.classList.add("preview-only");
             previewBtn.textContent = "Edit";
-            previewBtn.title = "Edit only (Ctrl+Shift+P)";
+            previewBtn.title = "Switch back to edit-only (Ctrl+Shift+P)";
         } else {
             previewMode = "edit-only";
             editorSection.classList.remove("preview-only", "split-view");
             editorSection.classList.add("edit-only");
-            previewBtn.textContent = "Preview";
-            previewBtn.title = "Show preview (Ctrl+Shift+P)";
+            previewBtn.textContent = "Split";
+            previewBtn.title = "Split view — editor + preview side by side (Ctrl+Shift+P)";
         }
 
         // Ensure preview is rendered when switching to preview modes
