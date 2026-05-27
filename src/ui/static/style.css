@@ -639,6 +639,49 @@ body {
     line-height: 1.45;
     word-break: break-word;
 }
+
+/* Message Action Toolbar */
+.message-toolbar {
+    display: flex;
+    gap: 2px;
+    padding: 4px 0 0 0;
+    opacity: 0;
+    transition: opacity 0.2s;
+    margin-top: 6px;
+    border-top: 1px solid transparent;
+}
+.message:hover .message-toolbar,
+.message-toolbar.force-show {
+    opacity: 1;
+    border-top-color: var(--border-color);
+}
+.msg-tool-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    transition: all 0.15s;
+}
+.msg-tool-btn:hover {
+    background: var(--bg-active);
+    color: var(--text-bright);
+}
+.msg-tool-btn.voted {
+    color: var(--accent-cyan);
+}
+.msg-tool-btn svg {
+    width: 14px;
+    height: 14px;
+    fill: currentColor;
+}
+.msg-tool-btn.copy-feedback {
+    color: var(--accent-green);
+}
 .message.user {
     align-self: flex-end;
     background: var(--accent-purple-dim);

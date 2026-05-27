@@ -533,12 +533,97 @@ status: draft
         window.addEventListener("keydown", safetyKeybinds);
     }
 
+    function addMessageToolbar(msgEl, type, options = {}) {
+        const toolbar = document.createElement("div");
+        toolbar.className = "message-toolbar";
+
+        if (type === "user") {
+            // Edit button
+            const editBtn = document.createElement("button");
+            editBtn.className = "msg-tool-btn";
+            editBtn.title = "Edit message";
+            editBtn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>`;
+            editBtn.addEventListener("click", () => {
+                chatInput.value = options.text || "";
+                chatInput.style.height = "auto";
+                chatInput.style.height = (chatInput.scrollHeight) + "px";
+                chatInput.focus();
+            });
+            toolbar.appendChild(editBtn);
+        }
+
+        if (type === "assistant") {
+            // Copy button
+            const copyBtn = document.createElement("button");
+            copyBtn.className = "msg-tool-btn";
+            copyBtn.title = "Copy message";
+            copyBtn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>`;
+            copyBtn.addEventListener("click", () => {
+                const text = msgEl.textContent;
+                navigator.clipboard.writeText(text).then(() => {
+                    copyBtn.classList.add("copy-feedback");
+                    setTimeout(() => copyBtn.classList.remove("copy-feedback"), 1200);
+                }).catch(() => {
+                    // Fallback
+                    const ta = document.createElement("textarea");
+                    ta.value = text;
+                    document.body.appendChild(ta);
+                    ta.select();
+                    document.execCommand("copy");
+                    document.body.removeChild(ta);
+                });
+            });
+            toolbar.appendChild(copyBtn);
+
+            // Retry button
+            if (options.lastUserText) {
+                const retryBtn = document.createElement("button");
+                retryBtn.className = "msg-tool-btn";
+                retryBtn.title = "Retry — resend last message";
+                retryBtn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>`;
+                retryBtn.addEventListener("click", () => {
+                    chatInput.value = options.lastUserText;
+                    sendChatMessage();
+                });
+                toolbar.appendChild(retryBtn);
+            }
+
+            // Vote: thumbs up
+            const upBtn = document.createElement("button");
+            upBtn.className = "msg-tool-btn";
+            upBtn.title = "Thumbs up";
+            upBtn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"/></svg>`;
+            upBtn.addEventListener("click", () => {
+                const wasVoted = upBtn.classList.toggle("voted");
+                if (wasVoted) downBtn.classList.remove("voted");
+            });
+            toolbar.appendChild(upBtn);
+
+            // Vote: thumbs down
+            const downBtn = document.createElement("button");
+            downBtn.className = "msg-tool-btn";
+            downBtn.title = "Thumbs down";
+            downBtn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M15 3H6c-.83 0-1.54.5-1.84 1.22l-3.02 7.05c-.09.23-.14.47-.14.73v2c0 1.1.9 2 2 2h6.31l-.95 4.57-.03.32c0 .41.17.79.44 1.06L9.83 23l6.59-6.59c.36-.36.58-.86.58-1.41V5c0-1.1-.9-2-2-2zm4 0v12h4V3h-4z"/></svg>`;
+            downBtn.addEventListener("click", () => {
+                const wasVoted = downBtn.classList.toggle("voted");
+                if (wasVoted) upBtn.classList.remove("voted");
+            });
+            toolbar.appendChild(downBtn);
+        }
+
+        msgEl.appendChild(toolbar);
+    }
+
+    let lastUserMessageText = "";
+
     function finalizeSessionState() {
         if (currentAssistantBubble) {
             currentAssistantBubble.classList.remove("streaming");
             // Render markdown in the completed assistant bubble
             const raw = currentAssistantBubble.textContent;
             currentAssistantBubble.innerHTML = renderMarkdown(raw);
+            // Add action toolbar to assistant message
+            addMessageToolbar(currentAssistantBubble, "assistant", { lastUserText: lastUserMessageText });
             currentAssistantBubble = null;
         }
         // Hide stop bar
@@ -588,6 +673,9 @@ status: draft
         const text = chatInput.value.trim();
         if (!text) return;
 
+        // Store for retry
+        lastUserMessageText = text;
+
         // Block UI input
         chatInput.disabled = true;
         chatSendBtn.disabled = true;
@@ -602,6 +690,8 @@ status: draft
         userBubble.className = "message user";
         userBubble.textContent = text;
         chatMessages.appendChild(userBubble);
+        // Add edit toolbar to user message
+        addMessageToolbar(userBubble, "user", { text });
         chatMessages.scrollTop = chatMessages.scrollHeight;
 
         chatInput.value = "";
