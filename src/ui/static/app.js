@@ -952,6 +952,52 @@ status: draft
             });
         }
 
+        // Vertical split handle (editor vs preview in split-view)
+        const splitHandleV = document.getElementById("split-handle-v");
+        const editorContainer = document.querySelector(".editor-container");
+        if (splitHandleV && editorContainer) {
+            let vDragging = false;
+            let vStartX = 0;
+            let vLeftPct = 50;
+
+            // Restore saved split position if available
+            try {
+                const saved = localStorage.getItem("dg-split-v");
+                if (saved) vLeftPct = parseFloat(saved);
+            } catch(e) {}
+
+            splitHandleV.addEventListener("mousedown", (e) => {
+                vDragging = true;
+                vStartX = e.clientX;
+                document.body.style.cursor = "col-resize";
+                document.body.style.userSelect = "none";
+                splitHandleV.classList.add("active");
+            });
+
+            document.addEventListener("mousemove", (e) => {
+                if (!vDragging) return;
+                const containerRect = editorContainer.getBoundingClientRect();
+                const containerWidth = containerRect.width;
+                if (containerWidth <= 0) return;
+                const vPct = ((e.clientX - containerRect.left) / containerWidth) * 100;
+                vLeftPct = Math.max(20, Math.min(80, vPct));
+                const textarea = document.getElementById("code-textarea");
+                const preview = document.getElementById("markdown-preview");
+                if (textarea) textarea.style.flex = `1 1 ${vLeftPct}%`;
+                if (preview) preview.style.flex = `1 1 ${100 - vLeftPct}%`;
+            });
+
+            document.addEventListener("mouseup", () => {
+                if (vDragging) {
+                    vDragging = false;
+                    document.body.style.cursor = "";
+                    document.body.style.userSelect = "";
+                    splitHandleV.classList.remove("active");
+                    try { localStorage.setItem("dg-split-v", vLeftPct.toString()); } catch(e) {}
+                }
+            });
+        }
+
         // Clear console/logs
         if (clearConsoleBtn) {
             clearConsoleBtn.addEventListener("click", () => {

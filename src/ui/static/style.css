@@ -399,17 +399,50 @@ body {
 }
 
 .editor-section.split-view #code-textarea {
-    width: calc(50% - 22.5px);
-    flex-shrink: 0;
-    flex-grow: 0;
+    flex: 1 1 50%;
+    min-width: 100px;
 }
 
 .editor-section.split-view .markdown-preview {
     display: block;
-    width: calc(50% - 22.5px);
+    flex: 1 1 50%;
+    min-width: 100px;
     border-left: 1px solid var(--border-color);
+}
+
+/* Vertical split handle between editor and preview */
+.split-handle-v {
+    display: none;
+    width: 6px;
+    cursor: col-resize;
+    background: transparent;
     flex-shrink: 0;
-    flex-grow: 0;
+    position: relative;
+    z-index: 2;
+    transition: background 0.15s;
+}
+.split-handle-v:hover,
+.split-handle-v.active {
+    background: var(--accent-cyan-dim);
+}
+.split-handle-v::after {
+    content: '';
+    position: absolute;
+    left: 2px;
+    top: 25%;
+    bottom: 25%;
+    width: 2px;
+    border-radius: 2px;
+    background: var(--border-color);
+    transition: background 0.15s;
+}
+.split-handle-v:hover::after,
+.split-handle-v.active::after {
+    background: var(--accent-cyan);
+}
+
+.editor-section.split-view .split-handle-v {
+    display: block;
 }
 
 .markdown-preview {
