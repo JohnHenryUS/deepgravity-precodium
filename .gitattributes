@@ -4,3 +4,4 @@ codium-fork/vscodium-bin/*.pak filter=lfs diff=lfs merge=lfs -text
 codium-fork/vscodium-bin/*.dat filter=lfs diff=lfs merge=lfs -text
 codium-fork/vscodium-bin/*.bin filter=lfs diff=lfs merge=lfs -text
 codium-fork/vscodium-bin/*.asar filter=lfs diff=lfs merge=lfs -text
+* text=auto
