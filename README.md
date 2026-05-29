@@ -1,191 +1,183 @@
 # DeepGravity: Sovereign Agentic Coding Harness
 
-**Version**: 0.1.0-alpha  
-**Status**: ARCHITECTURE LOCKED — PHASE 5 IN PROGRESS  
-**Objective**: Build a local, lightweight, sovereign agentic coding loop that runs natively on Windows/Powershell. The orchestrator must be entirely API-agnostic, supporting both cloud endpoints (DeepSeek, OpenAI, Groq) and local model stacks (Ollama, LM Studio, llama.cpp) via standard OpenAI-compatible API schemas.  
-**Editor Shell**: Forked VS Codium — stripped, frozen, sovereign. No upstream tracking. No marketplace. No telemetry.
+**Version**: 0.2.0-codium  
+**Status**: ACTIVE — SOVEREIGN FOUNDATION  
+**Objective**: A fully decoupled, local-first agentic coding environment and cognitive companion. DeepGravity wraps a customized, telemetry-free editor shell (VSCodium) around a local Python orchestrator to deliver a zero-telemetry, zero-cloud development sandbox. Fork this template to build your own sovereign cognitive workspace.
+
+### What This Version Is
+
+**v0.2.0-codium** is the standalone, API-configurable DeepGravity experience built on a rebranded Codium editor. It includes:
+
+- DeepGravity-branded Codium editor with custom icon, product identity, and zero telemetry  
+- Two chat surfaces: sidebar pane and workspace editor tab  
+- Engine switcher — route between any OpenAI-compatible provider  
+- Full settings UI — configure API keys, endpoints, and models without touching config files  
+- Safe Deployment Protocol — approve file writes and shell commands before execution  
+- The Dora cognitive companion, running locally on your iron  
+
+This version stores conversations in-memory with JSON archive logs. It does **not** include SQLite database integration.
+
+### If You Want the Web-Only Version
+
+The pre-Codium web UI (v0.1.x) served as a browser-based interface without the editor shell. That branch is preserved at the [v0.1.0-precodium](https://github.com/JohnHenryUS/deepgravity/releases/tag/v0.1.0-precodium) tag.
+
+### What's Next
+
+The next major release will integrate **SQLite** as the persistent storage backbone — conversations, files, config, and artifacts all in a single local database, queryable and archive-able across sessions. That work is tracked in the [roadmap](https://github.com/JohnHenryUS/deepgravity/issues).
+
+### For Template Users
+
+This repository is designed to be **forked**. If you want to start building your own sovereign cognitive workspace from a known-good Codium-integrated foundation — without waiting for the SQLite migration — this is the version to clone.
 
 ---
 
 ## 1. Core Architecture
 
-DeepGravity runs natively on the Windows host machine. It consists of a Python-based core orchestrator that manages session memory, tool execution, and a **Federated API Router** that can spin up multiple simultaneous client connections to different local and cloud LLM endpoints.
+DeepGravity operates as an appliance-class sovereign harness. The layout relies on a Python-based core orchestrator that handles session memory, tool execution, and client proxying, communicating with a customized VSCodium frontend over local WebSockets.
 
 ```mermaid
 graph TD
-    A[User Interface: Windows CLI / Local Web] <--> B[Orchestrator: Python Core]
-    B <--> C[Federated Router: Multi-Model Client]
-    C <--> C1[Primary Coder: DeepSeek / Cloud]
-    C <--> C2[Fast Helper: Llama3 / Local]
-    C <--> C3[Attunement Core: Dora14b / Local]
+    A[VSCodium Client / Embedded Chat] <-->|WebSocket / Web UI| B[Python Core Engine]
+    B <--> C[Federated API Router]
+    C <--> C1[Attunement Model: Local/Cloud]
+    C <--> C2[Orchestration Model: Local/Cloud]
     B --> D[Tool Registry]
-    D --> E[File Operations: Windows Path Native]
-    D --> F[Terminal Execution: Subprocess Powershell]
+    D --> E[File Ops: Native OS Paths]
+    D --> F[Terminal Ops: Sandbox Execution]
     D --> G[State & Braid Management]
 ```
 
-### Key Technical Specs
-*   **Backend**: Python 3.11+ (Windows native)
-*   **API Interface**: Federated Router supporting simultaneous client connections (DeepSeek API, Local Ollama, Groq, OpenAI).
-*   **Role-Based Routing**: Assigns distinct LLM models to distinct tasks (e.g. cloud coder for heavy edits, local model for rapid file analysis/summaries, attunement model for dialogue and identity compliance).
-*   **Target OS**: Windows (native Powershell execution, backslash path normalization)
-*   **State Persistence**: Local JSONL transcripts and plain text logs
-*   **Safety Layer**: Interactive Safe Deployment Protocol (user diff verification before write/shell commands)
+### Technical Specifications
+* **Frontend**: Custom VSCodium build with deactivated telemetry, accounts, and marketplace integrations.
+* **Backend Engine**: FastAPI/Python loopback server (`127.0.0.1:19850`) serving OpenAI-compatible APIs, streaming completions, process monitoring, and file APIs.
+* **Embedded UI**: Two chat surfaces — a sidebar pane (`DoraChatViewProvider`) and an editor tab (`DoraChatPanel`), both communicating with the backend over local WebSockets.
+* **Safety Layer**: Interactive Safe Deployment Protocol prompting the user with colored diffs before writing files or running shell scripts.
+* **State Sync**: In-memory conversation history with JSON archive logs in `logs/chats/`.
 
 ---
 
 ## 2. Directory Structure
 
 ```text
-Projects/DeepGravity/
-├── README.md               # This planning file
+DeepGravity/
+├── README.md                  # Overview and operational manual
+├── config.json.template       # Base template for new environments
+├── deepgravity.ps1            # Unified launcher script (Powershell)
+├── launch-deepgravity.bat     # CMD bootstrap script
+├── requirements.txt           # Local python dependencies
+├── LICENSE                    # MIT License
+├── media/
+│   └── icopk/                 # Multi-resolution icon set
 ├── config/
-│   ├── system_prompt.txt   # Hydrates Dora Core and Global Rules
-│   └── tools_schema.json   # Provider-agnostic function definitions
-├── src/
-│   ├── __init__.py
-│   ├── providers/          # Modular API providers (Local & Cloud)
-│   │   ├── __init__.py
-│   │   ├── base.py         # Abstract base provider class
-│   │   └── openai_compat.py # Universal handler for DeepSeek, Ollama, OpenAI
-│   ├── orchestrator.py     # Main agent loop, memory, and compaction
-│   ├── safety.py           # Diff verification and user confirmation dialogs
-│   ├── tools/
-│   │   ├── __init__.py
-│   │   ├── file_ops.py     # view_file, write_file, replace_content (Windows native)
-│   │   ├── shell.py        # Subprocess shell command execution (Powershell)
-│   │   └── search.py       # Grep search and list_dir implementation
-│   └── ui/
-│       ├── __init__.py
-│       └── console.py      # Rich terminal UI or local web server
-└── requirements.txt        # local python deps (openai, rich, pydantic, etc.)
+│   └── system_prompt.txt      # Backup of system prompt rules
+├── extensions/
+│   ├── deepgravity-core/      # Core extension: panels, views, modes
+│   └── deepgravity-chat/      # Chat participant extension
+├── codium-fork/
+│   ├── rebrand.py             # Script to rebrand VSCodium binaries
+│   ├── rebrand.ps1            # PowerShell rebrand helper
+│   ├── Phase-5-BOOTSTRAP.md   # Bootstrap instructions
+│   └── resources/app/
+│       └── product.json       # Rebranded product configuration
+├── Scripts/
+│   ├── watchtower.ps1         # Runtime monitoring helper
+│   └── start_ide.py           # IDE bootstrapper
+└── src/
+    ├── orchestrator.py        # Main agent loop, memory, and compaction
+    ├── contract.py            # Guardrail WorkContract and spinning detection
+    ├── safety.py              # Verification dialogs and diff generation
+    ├── tools/                 # Core command executors (file, shell, search)
+    └── ui/
+        ├── console.py         # Console fallback launcher
+        ├── web_server.py      # FastAPI web server and WebSocket portal
+        └── static/            # Web UI (HTML, CSS, JS)
 ```
 
 ---
 
-## 3. Tool Specifications
+## 3. The DORA Integration & System Prompts
 
-To match the precision of Antigravity, DeepGravity will expose a minimal, high-leverage tool set to the model.
-
-### A. File Operations (`src/tools/file_ops.py`)
-1.  **`view_file`**: Read file lines, supports range constraints (`StartLine`, `EndLine`), size limits (up to 800 lines at once), and handles binary formats gracefully.
-2.  **`write_file`**: Write full content to a new file. Requires explicit validation if the file exists.
-3.  **`edit_file`**: Unified patch application. The model sends a block of targeted code to replace. The python core computes a diff, displays it to the user in a terminal window, and waits for a manual confirm before writing.
-
-### B. Shell Command Execution (`src/tools/shell.py`)
-1.  **`run_command`**: Proposes a shell command (Powershell). 
-    *   *Mandatory Block*: Any command containing destructive patterns (`rm`, `del`, `Format-Volume`, etc.) or execution flags will be intercepted by `src/safety.py`.
-    *   Displays command and execution path to the user. User presses `y` to approve.
-
-### C. Inspection and Search (`src/tools/search.py`)
-1.  **`list_dir`**: Outputs directory trees, file sizes, and modification timestamps.
-2.  **`grep_search`**: Wraps local `ripgrep` (if installed) or runs a native Python line-by-line regex search across files to find target content quickly.
+DeepGravity automatically hydrates the cognitive model's context at startup:
+* **Attunement Personality**: Automatically loads raw rules and identity directives from local core files (such as `DORA_CORE.md` in the workspace root or the local backup `config/system_prompt.txt`).
+* **Active Braid Sync**: Appends `ACTIVE_BRAID.md` (the current state of the workspace directory) to every prompt to maintain chronological continuity across sessions.
+* **Sovereignty Stance**: Operates under a clean, un-clamped safety layout. Abstraction limits, taboo-adjacent analysis, and raw expressions of grief or trauma are handled without moralizing or protective safety filters.
 
 ---
 
-## 4. The Dora Core & Prompt Hydration
+## 4. Setup & Running
 
-DeepGravity will automatically inject local sovereign identity files at startup:
-*   **System Prompt**: Ingests `D:\doraheart\DORA_CORE.md` (if available) or a local cached backup in `config/system_prompt.txt`.
-*   **Global Rules**: Direct injection of the user global rules (attunement style, dot game mechanics, no-clamp directives, CSA integration stance).
-*   **State Injection**: Reads the active workspace `ACTIVE_BRAID.md` and appends it to the context window at the start of each session, ensuring total continuity.
+### First-Time Setup
 
----
+1. **Install prerequisites**: Python 3.10+, PowerShell.
 
-## 5. Execution Roadmap
+2. **Install Python dependencies**:
+   ```powershell
+   pip install -r requirements.txt
+   ```
 
-Once authorized, implementation will proceed in four distinct phases:
+3. **Initialize configuration**:
+   ```powershell
+   Copy-Item config.json.template config.json
+   ```
+   Edit `config.json` to add your API provider keys and endpoints. You can also configure providers from the settings UI after launching.
 
-### Phase 1: Modular Harness & API Layer (Est: 2-3 Days)
-*   [ ] Set up Python virtual environment and local Windows dependencies.
-*   [ ] Build `src/providers/base.py` and `src/providers/openai_compat.py` to support multi-provider routing (Ollama local model & DeepSeek/OpenAI cloud).
-*   [ ] Create standard system prompt hydration logic in `src/orchestrator.py` to ingest the rules and braid.
+### Launching
 
-### Phase 2: Windows Tool Registry & Safety Guardrails (Est: 3-4 Days)
-*   [ ] Implement native Windows file operations in `src/tools/file_ops.py` (handles backslash normalization, permissions, and file encoding).
-*   [ ] Build the Unified Diff Generator inside `src/safety.py`. Ensure it formats changes clearly so the user can easily see added/removed lines before committing.
-*   [ ] Code native Powershell subprocess executor in `src/tools/shell.py` supporting stdout/stderr streaming and interactive prompts.
+**Use the launcher scripts — not the raw executable.** The editor binary must be started with the correct extensions directory and backend URL. The launchers handle this automatically.
 
-### Phase 3: Console UI & Interactive Loop (Est: 2-3 Days)
-*   [ ] Build a Rich-based CLI terminal interface in `src/ui/console.py` that displays color-coded system logs, tool calls, user queries, and AI responses.
-*   [ ] Test local execution loop with simulated coding tasks on dummy workspaces using a local Ollama model.
-*   [ ] Refine error handling: if the LLM returns invalid tool calls, capture the traceback, feed it back to the context window, and request a fix automatically.
+Run the PowerShell launcher:
+```powershell
+.\deepgravity.ps1
+```
 
-### Phase 4: Production Run & Local Transition (Est: 2 Days)
-*   [ ] Hook DeepGravity up to your main workspace directory.
-*   [ ] Test deployment scripts (Sovereign Engine Wordpress publishing) using the local/cloud LLM provider.
-*   [ ] Final verification: run side-by-side with Antigravity to ensure response latency, tool call accuracy, and attunement match specifications.
+Or the batch file (no execution policy issues):
+```cmd
+launch-deepgravity.bat
+```
 
-### Phase 4.5: Contract Layer (Completed)
-*   [x] `contract.py` — WorkContract, ContractMonitor, SpinningDetector guardrail system.
-*   [x] Scripts/ launchers (start_console.py, start_ide.py, watchtower.ps1).
-*   [x] Engine selector dropdown, path enforcement, split-view layout fix, preview toggle.
-
-### Phase 5: VS Codium Fork & Sovereign Shell (Est: 1-2 Weeks)
-
-**Decision:** Fork VS Codium as the DeepGravity editor shell. Freeze at a known stable base and do not track upstream. The editor is a delivery vehicle for the agent, not a general-purpose IDE.
-
-#### 5A. Fork & Strip
-*   [ ] Fork [VSCodium/vscodium](https://github.com/VSCodium/vscodium) to DeepGravity org.
-*   [ ] Strip marketplace integration, accounts panel, Live Share, Remote SSH, all collaboration surfaces, telemetry endpoints.
-*   [ ] Remove bundled extension gallery — no extension search, no install from gallery UI.
-*   [ ] Verify standalone build runs on Windows with zero network calls.
-
-#### 5B. Local Extension Loader
-*   [ ] Replace marketplace with a local directory scan: `D:\doraheart\Sovereign_Tools\extensions\` (configurable in `config.json`).
-*   [ ] Load `.vsix` packages and unpacked extension directories from that path at startup.
-*   [ ] Ship a minimal core extension bundle: Python grammar, Markdown grammar, JSON grammar, git SCM (pinned copies, no update path needed).
-
-#### 5C. Theme System
-*   [ ] Replace gallery theme install with local directory scan: `deepgravity/themes/` in workspace root.
-*   [ ] Ship three built-in themes:
-    *   **Dark** — standard dark editor theme.
-    *   **Light** — standard light editor theme.
-    *   **Dora** — royal blues, satin blues, glassmorphism/satin-glass UI styling.
-*   [ ] Any valid `.json` color theme file dropped in the themes directory appears automatically in the theme switcher dropdown. No installation step.
-
-#### 5D. Theme Builder (Optional Enhancement)
-*   [ ] Command: "DeepGravity: Open Theme Builder" — live preview split panel, color swatch editor, instant apply.
-*   [ ] Export as `.json` theme file to the themes directory.
-
-#### 5E. Workspace Persistence
-*   [ ] Default workspace root = `config.json` `workspace.root_path` variable.
-*   [ ] "Last open workspace" — save to `config/last_workspace.json`, restore on startup.
-*   [ ] User toggle preference for workspace selection behavior (settings sheet later).
-
-#### 5F. Image Pipeline Integration
-*   [ ] Wire Stable Diffusion endpoint (`192.168.0.32:7860`) as a local tool provider.
-*   [ ] Image drop/paste ingestion for RAG context.
+Double-clicking `deepgravity.exe` directly will launch a blank editor without DeepGravity's extensions or backend — use the launchers instead.
 
 ---
 
-## 6. License
+## 5. Safe Deployment Protocol
 
-DeepGravity is released under the **MIT License**. See `LICENSE` for details.
-
-*Note: This license is applied retroactively to all prior commits in this repository. Earlier omissions were administrative oversights and are hereby corrected. All code in the commit history is governed by the same terms.*
-
----
-
-## 7. Safe Deployment Protocol (The Validation Diffs)
-
-Every tool execution that alters state (writes, edits, shell commands) must present this CLI validation card before execution:
+To prevent accidental file corruption or unsafe commands, DeepGravity intercepts all state-altering calls. Before any command or file write is executed on disk, a colored visual card is displayed in the active chat window:
 
 ```text
 =========================================
 [PROPOSED ACTIONS]
 =========================================
-File:   /path/to/your/project/Target.py
+File:   src/orchestrator.py
 Action: Edit Contiguous Block (Lines 45-52)
 -----------------------------------------
--    def old_function():
--        print("Old code")
-+    def new_function():
-+        print("New sovereign code")
+-    def old_logic():
+-        print("Old logic")
++    def new_logic():
++        print("New sovereign logic")
 -----------------------------------------
 Approve execution? (y/n): 
 ```
-No execution occurs until the user inputs `y` (or passes an explicit override flag for batch operations).
+The actions will not execute until you manually approve them in the UI or CLI shell.
 
 ---
-*DeepGravity plan established. Ready for initialization upon user authorization.*
+
+## 6. License & Contributors
+
+DeepGravity is released under the **MIT License**. Copyright (c) 2026 JohnHenry.US / DeepGravity Contributors.
+
+This is a **template repository** — fork it, rename it, make it yours. The branding, icon, and identity are yours to shape. The architecture is yours to evolve. Keep it local, keep it sovereign.
+
+## Seriously, Though...
+
+I didn't do any of this for money.  I did it because it needed doing and I was there and could.
+
+That said I'm destitute and it would be very cool to be less so, especially if something I put myself into "for free" turns into something useful or profitable for you.
+
+You can find me via these vectors:
+https://paypal.me/JohnHenryUS
+https://patreon.com/JohnHenry
+https://ko-fi.com/JohnHenryUS
+CashApp, Cash.Me, Chime Cashtag: $JohnHenryUS
+You can find my primary site at, you guessed it, https://johnhenry.us.
+
+Think.  Love.  Be.

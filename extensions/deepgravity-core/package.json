@@ -1,0 +1,125 @@
+{
+  "name": "deepgravity-core",
+  "displayName": "DeepGravity Core",
+  "description": "Cognitive Collaboration Environment — Dora, layout modes, timeline, and panel system",
+  "version": "0.1.0",
+  "publisher": "DeepGravity",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.121.0"
+  },
+  "categories": [
+    "Chat",
+    "Themes",
+    "Other"
+  ],
+  "keywords": [
+    "deepgravity",
+    "cce",
+    "dora",
+    "cognitive-collaboration",
+    "sovereign"
+  ],
+  "activationEvents": [
+    "*"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "deepgravity.ideMode",
+        "title": "DeepGravity: IDE Mode"
+      },
+      {
+        "command": "deepgravity.cceMode",
+        "title": "DeepGravity: CCE Mode"
+      },
+      {
+        "command": "deepgravity.docMode",
+        "title": "DeepGravity: Document Mode"
+      },
+      {
+        "command": "deepgravity.openDora",
+        "title": "DeepGravity: Open Dora Chat"
+      },
+      {
+        "command": "deepgravity.toggleTimeline",
+        "title": "DeepGravity: Toggle Timeline Panel"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "deepgravity",
+          "title": "DeepGravity",
+          "icon": "icon.png"
+        }
+      ]
+    },
+    "views": {
+      "deepgravity": [
+        {
+          "type": "webview",
+          "id": "deepgravity.doraChat",
+          "name": "Dora Chat"
+        },
+        {
+          "type": "webview",
+          "id": "deepgravity.timeline",
+          "name": "Timeline"
+        },
+        {
+          "type": "webview",
+          "id": "deepgravity.referenceDock",
+          "name": "Reference Dock"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "deepgravity.doraChat",
+        "contents": "Dora is ready.\n[Open Dora Chat](command:deepgravity.openDora)"
+      }
+    ],
+    "configuration": {
+      "title": "DeepGravity",
+      "properties": {
+        "deepgravity.defaultMode": {
+          "type": "string",
+          "enum": [
+            "ide",
+            "cce",
+            "doc"
+          ],
+          "default": "ide",
+          "description": "Default layout mode on startup"
+        },
+        "deepgravity.extensionsDir": {
+          "type": "string",
+          "default": "",
+          "description": "Path to local extensions directory. Overrides launcher default."
+        },
+        "deepgravity.sdEndpoint": {
+          "type": "string",
+          "default": "http://localhost:7860",
+          "description": "Stable Diffusion API endpoint"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./tsconfig.json",
+    "watch": "tsc -watch -p ./tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.1",
+    "@types/vscode": "^1.120.0",
+    "typescript": "^5.8.0"
+  },
+  "icon": "icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/JohnHenryUS/deepgravity"
+  }
+}

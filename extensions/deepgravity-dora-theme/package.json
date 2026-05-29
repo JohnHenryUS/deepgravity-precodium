@@ -1,0 +1,24 @@
+{
+  "name": "deepgravity-dora-theme",
+  "displayName": "Dora Theme",
+  "description": "The Dora color theme — royal blues, satin blues, glassmorphism UI for DeepGravity",
+  "version": "0.1.0",
+  "publisher": "DeepGravity",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.121.0"
+  },
+  "categories": [
+    "Themes"
+  ],
+  "contributes": {
+    "themes": [
+      {
+        "label": "Dora",
+        "uiTheme": "vs-dark",
+        "path": "./themes/dora-color-theme.json"
+      }
+    ]
+  },
+  "icon": "icon.png"
+}

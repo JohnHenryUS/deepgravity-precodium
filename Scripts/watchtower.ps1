@@ -16,7 +16,7 @@
 .EXAMPLE
   .\watchtower.ps1
   .\watchtower.ps1 -Watch -Threshold 15
-  .\watchtower.ps1 -Path D:\google-drive-dora-bugout\Projects\DeepGravity
+  .\watchtower.ps1 -Path C:\projects\DeepGravity
 #>
 
 param(
@@ -77,7 +77,7 @@ function Show-Diagnostics {
             Write-Host "`n[!] Recent session: $($latest.Name) ($([math]::Round($latest.Length/1024)) KB)" -ForegroundColor Yellow
         }
     }
-    Write-Host "`nTo restart orchestrator: cd $Path && python -m src.main" -ForegroundColor Cyan
+    Write-Host "`nTo restart orchestrator: cd $Path && python Scripts/start_ide.py" -ForegroundColor Cyan
     $dgRoot = Split-Path (Split-Path $Path -Parent) -Parent
     $staticDir = Join-Path $dgRoot "src" "ui" "static"
     if (Test-Path $staticDir) {

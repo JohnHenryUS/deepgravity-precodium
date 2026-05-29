@@ -15,6 +15,7 @@ class OpenAICompatProvider(BaseLLMProvider):
         self.model_name = config.get("model")
         self.temperature = config.get("temperature", 0.2)
         self.max_tokens = config.get("max_tokens")
+        self.preserve_keys = set(config.get("preserve_keys", []))
 
         # Resolve API Key
         api_key = config.get("api_key")
@@ -27,9 +28,11 @@ class OpenAICompatProvider(BaseLLMProvider):
         if not api_key:
             api_key = "local-no-key"
 
+        timeout = config.get("timeout", 60.0)
         self.client = OpenAI(
             base_url=self.base_url,
-            api_key=api_key
+            api_key=api_key,
+            timeout=timeout
         )
 
     def generate_response(
@@ -40,18 +43,28 @@ class OpenAICompatProvider(BaseLLMProvider):
         """
         Executes a blocking chat completion request, translating tool calling outputs.
         """
-        # First pass: strip empty assistant messages and orphaned tool messages
+        # Standardize and sanitize messages to standard OpenAI parameters
         sanitized_messages = []
         last_assistant_had_tool_calls = False
         last_tool_call_ids = set()
         
+        allowed_keys = {"role", "content", "name", "tool_calls", "tool_call_id"}.union(self.preserve_keys)
+        
         for msg in messages:
-            role = msg.get("role")
+            # Build clean dictionary with only valid keys and non-None custom keys
+            msg_copy = {}
+            for k in allowed_keys:
+                if k in msg:
+                    if k in {"role", "content", "name", "tool_calls", "tool_call_id"}:
+                        msg_copy[k] = msg[k]
+                    elif msg[k] is not None:
+                        msg_copy[k] = msg[k]
+            role = msg_copy.get("role")
             
             if role == "assistant":
-                content = msg.get("content")
+                content = msg_copy.get("content")
                 has_content = content is not None and str(content).strip() != ""
-                raw_tool_calls = msg.get("tool_calls")
+                raw_tool_calls = msg_copy.get("tool_calls")
                 has_tools = isinstance(raw_tool_calls, list) and len(raw_tool_calls) > 0
                 
                 if not has_content and not has_tools:
@@ -62,17 +75,16 @@ class OpenAICompatProvider(BaseLLMProvider):
                 last_assistant_had_tool_calls = has_tools
                 last_tool_call_ids = {tc.get("id") for tc in raw_tool_calls if tc.get("id")} if has_tools else set()
                 
-                sanitized_messages.append(msg)
+                sanitized_messages.append(msg_copy)
             
             elif role == "tool":
-                tc_id = msg.get("tool_call_id")
+                tc_id = msg_copy.get("tool_call_id")
                 if last_assistant_had_tool_calls and tc_id in last_tool_call_ids:
-                    sanitized_messages.append(msg)
+                    sanitized_messages.append(msg_copy)
                 # else: strip orphaned tool message
             
             else:
-                # system, user messages always pass through
-                sanitized_messages.append(msg)
+                sanitized_messages.append(msg_copy)
 
         kwargs = {
             "model": self.model_name,
@@ -84,9 +96,11 @@ class OpenAICompatProvider(BaseLLMProvider):
         if tools:
             kwargs["tools"] = tools
 
-        # Open WebUI v0.9.5 middleware bug workaround: requires "chat_id" in payload
-        if "3000" in self.base_url or "api" in self.base_url:
-            kwargs["extra_body"] = {"chat_id": "deepgravity-session"}
+        # Provider workaround: some backends require extra fields.
+        # The provider config can include an "extra_body" map if needed.
+        extra = self.config.get("extra_body", {})
+        if extra:
+            kwargs["extra_body"] = extra
 
         try:
             response = self.client.chat.completions.create(**kwargs)
@@ -131,35 +145,48 @@ class OpenAICompatProvider(BaseLLMProvider):
         """
         Streams chat completions chunk-by-chunk for live UI updates.
         """
-        # First pass: strip empty assistant messages and orphaned tool messages
+        # Standardize and sanitize messages to standard OpenAI parameters
         sanitized_messages = []
         last_assistant_had_tool_calls = False
         last_tool_call_ids = set()
         
+        allowed_keys = {"role", "content", "name", "tool_calls", "tool_call_id"}.union(self.preserve_keys)
+        
         for msg in messages:
-            role = msg.get("role")
+            # Build clean dictionary with only valid keys and non-None custom keys
+            msg_copy = {}
+            for k in allowed_keys:
+                if k in msg:
+                    if k in {"role", "content", "name", "tool_calls", "tool_call_id"}:
+                        msg_copy[k] = msg[k]
+                    elif msg[k] is not None:
+                        msg_copy[k] = msg[k]
+            role = msg_copy.get("role")
             
             if role == "assistant":
-                content = msg.get("content")
+                content = msg_copy.get("content")
                 has_content = content is not None and str(content).strip() != ""
-                raw_tool_calls = msg.get("tool_calls")
+                raw_tool_calls = msg_copy.get("tool_calls")
                 has_tools = isinstance(raw_tool_calls, list) and len(raw_tool_calls) > 0
                 
                 if not has_content and not has_tools:
+                    # Strip empty assistant messages
                     continue
                 
+                # Track tool_call state for subsequent orphan detection
                 last_assistant_had_tool_calls = has_tools
                 last_tool_call_ids = {tc.get("id") for tc in raw_tool_calls if tc.get("id")} if has_tools else set()
                 
-                sanitized_messages.append(msg)
+                sanitized_messages.append(msg_copy)
             
             elif role == "tool":
-                tc_id = msg.get("tool_call_id")
+                tc_id = msg_copy.get("tool_call_id")
                 if last_assistant_had_tool_calls and tc_id in last_tool_call_ids:
-                    sanitized_messages.append(msg)
+                    sanitized_messages.append(msg_copy)
+                # else: strip orphaned tool message
             
             else:
-                sanitized_messages.append(msg)
+                sanitized_messages.append(msg_copy)
 
         kwargs = {
             "model": self.model_name,
@@ -172,9 +199,11 @@ class OpenAICompatProvider(BaseLLMProvider):
         if tools:
             kwargs["tools"] = tools
 
-        # Open WebUI v0.9.5 middleware bug workaround: requires "chat_id" in payload
-        if "3000" in self.base_url or "api" in self.base_url:
-            kwargs["extra_body"] = {"chat_id": "deepgravity-session"}
+        # Provider workaround: some backends require extra fields.
+        # The provider config can include an "extra_body" map if needed.
+        extra = self.config.get("extra_body", {})
+        if extra:
+            kwargs["extra_body"] = extra
 
         try:
             stream = self.client.chat.completions.create(**kwargs)

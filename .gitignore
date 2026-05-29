@@ -1,9 +1,9 @@
-# Python
+# Python (root-level only)
 __pycache__/
 *.py[cod]
 *.egg-info/
-dist/
-build/
+/dist/
+/build/
 
 # Environment
 .env
@@ -25,3 +25,26 @@ Thumbs.db
 # IDE
 .vscode/
 .obsidian/
+
+# Extensions
+node_modules/
+
+# Backup artifacts
+*.bak
+
+# Editor binary — keep in template, stable across forks and rebuilds
+# codium-fork/vscodium-bin/
+
+# Old binary backup after rebrand (temp artifact, not needed for template)
+codium-fork/vscodium-bin/deepgravity.exe.old
+
+# Compressed VSCodium download archive (not needed once extracted)
+codium-fork/VSCodium-win32-x64-*.zip
+
+# Junk drawer — moved artifacts pending deletion confirmation
+junkdrawer/
+
+codium-fork/vscodium-bin/deepgravity.exe
+codium-fork/vscodium-bin/deepgravity.exe.original
+
+codium-fork/vscodium-bin/deepgravity.exe.i

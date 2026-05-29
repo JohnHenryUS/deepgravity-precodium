@@ -1,5 +1,11 @@
 // DeepGravity Web Workspace Controller
 document.addEventListener("DOMContentLoaded", () => {
+    // Check for embedded mode
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get("embed") === "chat") {
+        document.body.classList.add("embed-chat");
+    }
+
     // DOM Bindings
     const fileTreeContainer = document.getElementById("file-tree");
     const refreshTreeBtn = document.getElementById("refresh-tree-btn");
@@ -21,6 +27,7 @@ document.addEventListener("DOMContentLoaded", () => {
     const safetyApproveBtn = document.getElementById("safety-approve-btn");
     const safetyDenyBtn = document.getElementById("safety-deny-btn");
     const engineSelector = document.getElementById("engine-selector");
+    const engineSelectorEmbed = document.getElementById("engine-selector-embed");
     const previewBtn = document.getElementById("btn-toggle-preview");
     const markdownPreview = document.getElementById("markdown-preview");
     const newDocBtn = document.getElementById("btn-new-doc");
@@ -370,7 +377,17 @@ status: draft
             } else if (msg.type === "complete") {
                 finalizeSessionState();
             } else if (msg.type === "error") {
-                appendSystemMessage(`Error: ${msg.message}`, "error");
+                const errMsg = msg.message || "";
+                // Catch configuration/auth errors and give clear instructions
+                if (errMsg.includes("provider") || errMsg.includes("401") || errMsg.includes("key") || errMsg.includes("auth")) {
+                    appendSystemMessage(
+                        "⚠️ " + errMsg + "\n\n" +
+                        "Open Settings (gear icon in sidebar) → check your provider endpoint and API key → Save → try again.",
+                        "error"
+                    );
+                } else {
+                    appendSystemMessage("Error: " + errMsg, "error");
+                }
                 finalizeSessionState();
             }
         };
@@ -870,8 +887,12 @@ status: draft
 
                 // Populate select options grouped by provider
                 engineSelector.innerHTML = "";
+                if (engineSelectorEmbed) engineSelectorEmbed.innerHTML = "";
                 
-                // Add an option group per provider
+                let selectedVal = "";
+                let fallbackVal = "";
+
+                // Add options per provider
                 Object.keys(availableModelsCache).forEach(provName => {
                     const provInfo = availableModelsCache[provName];
                     const models = provInfo.models || [];
@@ -879,19 +900,38 @@ status: draft
                     
                     models.forEach(modelId => {
                         const option = document.createElement("option");
-                        option.value = JSON.stringify({ provider: provName, model: modelId });
+                        const valObj = { provider: provName, model: modelId };
+                        const valStr = JSON.stringify(valObj);
+                        option.value = valStr;
                         option.textContent = `${provName} :: ${modelId}`;
+                        
                         // Select if this provider+model matches the current routing
-                        if (provName === activeRole && modelId === activeModel) {
-                            option.selected = true;
+                        if (provName === activeRole) {
+                            if (modelId === activeModel) {
+                                option.selected = true;
+                                selectedVal = valStr;
+                            } else if (!fallbackVal) {
+                                fallbackVal = valStr;
+                            }
                         }
                         engineSelector.appendChild(option);
+
+                        // Mirror into embed selector
+                        if (engineSelectorEmbed) {
+                            const optionEmbed = option.cloneNode(true);
+                            engineSelectorEmbed.appendChild(optionEmbed);
+                        }
                     });
                 });
 
-                // Add change event listener
-                engineSelector.onchange = async () => {
-                    const selectedVal = engineSelector.value;
+                const finalVal = selectedVal || fallbackVal;
+                if (finalVal) {
+                    engineSelector.value = finalVal;
+                    if (engineSelectorEmbed) engineSelectorEmbed.value = finalVal;
+                }
+
+                // Add change event listener (shared handler for both selectors)
+                async function handleEngineChange(selectedVal) {
                     if (!selectedVal || !currentConfig) return;
 
                     let providerName, modelName;
@@ -900,19 +940,19 @@ status: draft
                         providerName = parsed.provider;
                         modelName = parsed.model;
                     } catch {
-                        // Fallback for legacy format
                         providerName = selectedVal;
                         modelName = currentConfig.api.providers[providerName]?.model || "";
                     }
 
                     if (!providerName) return;
 
-                    // Update the provider's model and routing
-                    if (currentConfig.api.providers[providerName]) {
-                        currentConfig.api.providers[providerName].model = modelName;
-                    }
+                    currentConfig.api.providers[providerName] && (currentConfig.api.providers[providerName].model = modelName);
                     currentConfig.api.routing.attunement_core = providerName;
                     currentConfig.api.routing.primary_orchestrator = providerName;
+
+                    // Sync both selectors to the same value
+                    if (engineSelector) engineSelector.value = selectedVal;
+                    if (engineSelectorEmbed) engineSelectorEmbed.value = selectedVal;
 
                     try {
                         const updateRes = await fetch("/api/config", {
@@ -929,7 +969,13 @@ status: draft
                     } catch (err) {
                         alert(`Failed to update config: ${err.message}`);
                     }
-                };
+                }
+
+                // Add change event listener
+                engineSelector.onchange = () => handleEngineChange(engineSelector.value);
+                if (engineSelectorEmbed) {
+                    engineSelectorEmbed.onchange = () => handleEngineChange(engineSelectorEmbed.value);
+                }
             }
         } catch (err) {
             console.error("Failed to load engine list:", err);
@@ -939,12 +985,28 @@ status: draft
                 currentConfig = await res.json();
                 if (currentConfig?.api?.providers) {
                     engineSelector.innerHTML = "";
+                    if (engineSelectorEmbed) engineSelectorEmbed.innerHTML = "";
+                    const routing = currentConfig.api.routing || {};
+                    const activeRole = routing.attunement_core || routing.primary_orchestrator || "";
+
                     Object.keys(currentConfig.api.providers).forEach(provName => {
                         const option = document.createElement("option");
                         option.value = provName;
                         option.textContent = `${provName} (${currentConfig.api.providers[provName].model || '?'})`;
+                        if (provName === activeRole) {
+                            option.selected = true;
+                        }
                         engineSelector.appendChild(option);
+                        if (engineSelectorEmbed) {
+                            const optionEmbed = option.cloneNode(true);
+                            engineSelectorEmbed.appendChild(optionEmbed);
+                        }
                     });
+
+                    if (activeRole) {
+                        engineSelector.value = activeRole;
+                        if (engineSelectorEmbed) engineSelectorEmbed.value = activeRole;
+                    }
                 }
             } catch (fallbackErr) {
                 console.error("Fallback config load also failed:", fallbackErr);

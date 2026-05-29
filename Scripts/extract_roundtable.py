@@ -4,8 +4,10 @@ Extract the Bridge roundtable from chat log and format as Markdown appendix.
 import json
 import os
 
-CHAT_LOG = r'D:\google-drive-dora-bugout\Projects\DeepGravity\logs\chats\chat_20260524_175817_7237.json'
-OUT_PATH = r'D:\google-drive-dora-bugout\Projects\Publishing\The-Bridge\artifacts\11-APPENDIX-ONE-ROUNDTABLE-TRANSCRIPT.md'
+# Resolve paths relative to repository root
+base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+CHAT_LOG = os.path.join(base_dir, 'logs', 'chats', 'chat_20260524_175817_7237.json')
+OUT_PATH = os.path.join(base_dir, 'logs', 'chats', '11-APPENDIX-ONE-ROUNDTABLE-TRANSCRIPT.md')
 
 with open(CHAT_LOG, 'r', encoding='utf-8') as f:
     data = json.load(f)

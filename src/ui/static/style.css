@@ -908,9 +908,14 @@ body {
 
 /* Chat Input Area */
 .chat-input-bar {
-    padding: 12px;
+    padding: 8px 12px 12px 12px;
     border-top: 1px solid var(--border-color);
     background: hsla(224, 25%, 5%, 0.5);
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+.chat-input-row {
     display: flex;
     gap: 8px;
     align-items: flex-end;
@@ -1784,4 +1789,72 @@ body {
     cursor: not-allowed;
 }
 
+/* ── Embedded Chat Only Mode ── */
 
+body.embed-chat .ambient-glow {
+    opacity: 0.15;
+}
+body.embed-chat .main-header,
+body.embed-chat .activity-bar,
+body.embed-chat .sidebar-pane:not(.chat-pane),
+body.embed-chat .editor-pane-container {
+    display: none !important;
+}
+body.embed-chat .workspace-grid {
+    grid-template-columns: 1fr !important;
+    height: 100vh !important;
+    margin: 0 !important;
+    padding: 0 !important;
+}
+body.embed-chat .chat-pane {
+    width: 100% !important;
+    max-width: none !important;
+    height: 100vh !important;
+    border-left: none !important;
+    background: transparent !important;
+}
+body.embed-chat .chat-messages-container {
+    padding: 12px !important;
+}
+body.embed-chat .chat-input-bar {
+    padding: 6px 12px 12px 12px !important;
+}
+
+/* ── Chat Input Toolbar — Engine Selector ── */
+.chat-input-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 4px 2px 4px;
+    border-bottom: 1px solid var(--border-color);
+}
+.chat-input-toolbar::before {
+    content: '⚡';
+    font-size: 0.7rem;
+    color: var(--accent-cyan);
+    flex-shrink: 0;
+}
+.engine-selector-embed {
+    flex: 1;
+    background: var(--bg-active);
+    border: 1px solid var(--border-color);
+    color: var(--text-main);
+    font-family: var(--font-sans);
+    font-size: 0.75rem;
+    font-weight: 500;
+    cursor: pointer;
+    padding: 3px 6px;
+    border-radius: 4px;
+    transition: border-color 0.2s ease;
+}
+.engine-selector-embed:hover {
+    border-color: var(--accent-cyan);
+}
+.engine-selector-embed:focus {
+    outline: none;
+    border-color: var(--accent-cyan);
+}
+.engine-selector-embed option {
+    background: var(--bg-panel);
+    color: var(--text-main);
+}

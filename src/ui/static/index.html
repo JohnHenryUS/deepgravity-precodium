@@ -4,10 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>DeepGravity // Sovereign IDE</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;700&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/style.css?v=1.0.2">
     <!-- Markdown parser for document preview -->
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
@@ -220,10 +221,17 @@
 
                 <!-- Input box -->
                 <div class="chat-input-bar">
-                    <textarea id="chat-input" placeholder="Type a message... (Shift+Enter for newline)" rows="1"></textarea>
-                    <button id="chat-send-btn" title="Send message">
-                        <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
-                    </button>
+                    <div class="chat-input-toolbar">
+                        <select id="engine-selector-embed" class="model-badge-select engine-selector-embed">
+                            <option value="">Loading engine...</option>
+                        </select>
+                    </div>
+                    <div class="chat-input-row">
+                        <textarea id="chat-input" placeholder="Type a message... (Shift+Enter for newline)" rows="1"></textarea>
+                        <button id="chat-send-btn" title="Send message">
+                            <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+                        </button>
+                    </div>
                 </div>
             </aside>
         </div>
@@ -327,6 +335,6 @@
         </div>
     </div>
     
-    <script src="/static/app.js"></script>
+    <script src="/static/app.js?v=1.0.2"></script>
 </body>
 </html>

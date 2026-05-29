@@ -11,6 +11,6 @@ from src.ui.web_server import app
 if __name__ == "__main__":
     print("==================================================")
     print("DeepGravity Sovereign IDE - Starting Web Server")
-    print("URL: http://127.0.0.1:8000")
+    print("URL: http://127.0.0.1:19850")
     print("==================================================")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=19850)

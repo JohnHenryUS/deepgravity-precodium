@@ -498,7 +498,11 @@ class DeepGravityOrchestrator:
         # Set active provider: prefer the attunement core (dialogue) for the primary interface loop
         active_provider = dialogue_provider if dialogue_provider else coder_provider
         if not active_provider:
-            raise RuntimeError("No LLM provider resolved for agent execution loop.")
+            raise RuntimeError(
+                "\u26a0\ufe0f No AI provider configured.\n\n"
+                "Open Settings (gear icon in the sidebar) \u2192 add a provider with your API endpoint and key \u2192 Save.\n"
+                "Then send your message again."
+            )
 
         # Expose tools only if the active provider model supports them
         active_role = "attunement_core" if active_provider == dialogue_provider else "primary_orchestrator"
@@ -582,7 +586,11 @@ class DeepGravityOrchestrator:
         # Set active provider: prefer the attunement core for the primary loop
         active_provider = dialogue_provider if dialogue_provider else coder_provider
         if not active_provider:
-            raise RuntimeError("No LLM provider resolved for agent execution loop.")
+            raise RuntimeError(
+                "\u26a0\ufe0f No AI provider configured.\n\n"
+                "Open Settings (gear icon in the sidebar) \u2192 add a provider with your API endpoint and key \u2192 Save.\n"
+                "Then send your message again."
+            )
 
         # Expose tools only if the active provider model supports them
         active_role = "attunement_core" if active_provider == dialogue_provider else "primary_orchestrator"

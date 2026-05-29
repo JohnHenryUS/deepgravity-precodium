@@ -1,5 +1,11 @@
 // DeepGravity Web Workspace Controller
 document.addEventListener("DOMContentLoaded", () => {
+    // Check for embedded mode
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get("embed") === "chat") {
+        document.body.classList.add("embed-chat");
+    }
+
     // DOM Bindings
     const fileTreeContainer = document.getElementById("file-tree");
     const refreshTreeBtn = document.getElementById("refresh-tree-btn");
@@ -21,6 +27,11 @@ document.addEventListener("DOMContentLoaded", () => {
     const safetyApproveBtn = document.getElementById("safety-approve-btn");
     const safetyDenyBtn = document.getElementById("safety-deny-btn");
     const engineSelector = document.getElementById("engine-selector");
+    const engineSelectorEmbed = document.getElementById("engine-selector-embed");
+    const previewBtn = document.getElementById("btn-toggle-preview");
+    const markdownPreview = document.getElementById("markdown-preview");
+    const newDocBtn = document.getElementById("btn-new-doc");
+    const editorSection = document.querySelector(".editor-section");
 
     // Application State
     let activeFilePath = null;
@@ -29,6 +40,7 @@ document.addEventListener("DOMContentLoaded", () => {
     let currentAssistantBubble = null;
     let currentToolboxContainer = null;  // collapsed toolbox wrapper for tool cards per round
     let activeToolCards = {};
+    let previewMode = "edit-only";  // "edit-only" | "preview-only" | "split-view"
 
     // 1. File Explorer Operations
     async function loadWorkspaceTree() {
@@ -111,6 +123,23 @@ document.addEventListener("DOMContentLoaded", () => {
                 activeFileName.textContent = path;
                 saveFileBtn.disabled = true; // Unmodified initially
                 updateLineNumbers();
+                // Auto-switch to split preview for .md files
+                if (path.endsWith(".md")) {
+                    if (previewMode === "edit-only") {
+                        previewMode = "split-view";
+                        editorSection.classList.add("split-view");
+                        previewBtn.textContent = "Full Preview";
+                        previewBtn.title = "Switch to full preview-only (Ctrl+Shift+P)";
+                    }
+                    updateMarkdownPreview();
+                } else {
+                    // Non-markdown: reset to edit-only
+                    previewMode = "edit-only";
+                    editorSection.classList.remove("preview-only", "split-view");
+                    previewBtn.textContent = "Preview";
+                    previewBtn.title = "Preview only available for .md files (Ctrl+Shift+P)";
+                    markdownPreview.innerHTML = '<div style="color: var(--text-muted); padding: 2em; text-align: center;">Open a .md file to see the rendered preview</div>';
+                }
             } else {
                 alert(`Error opening file: ${data.detail || "Access Denied"}`);
             }
@@ -139,9 +168,148 @@ document.addEventListener("DOMContentLoaded", () => {
         updateLineNumbers();
         // Toggle save button state based on modification check
         saveFileBtn.disabled = codeTextarea.value === originalFileContent;
+        // Update markdown preview if in a preview mode
+        if (previewMode !== "edit-only") {
+            updateMarkdownPreview();
+        }
     });
 
     codeTextarea.addEventListener("scroll", syncEditorScroll);
+
+    // ── Markdown Preview System ──
+    function updateMarkdownPreview() {
+        const text = codeTextarea.value;
+        if (!text || !activeFilePath || !activeFilePath.endsWith(".md")) {
+            markdownPreview.innerHTML = activeFilePath && activeFilePath.endsWith(".md")
+                ? '<div style="color: var(--text-muted); padding: 2em; text-align: center;">Rendering...</div>'
+                : '<div style="color: var(--text-muted); padding: 2em; text-align: center;">Open a .md file to see the rendered preview</div>';
+            return;
+        }
+        try {
+            // Use marked if available, fall back to simple renderer
+            if (typeof marked !== "undefined") {
+                marked.setOptions({
+                    breaks: true,
+                    gfm: true
+                });
+                markdownPreview.innerHTML = marked.parse(text);
+            } else {
+                // Fallback: basic rendering
+                let html = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                html = html.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
+                html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+                html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+                html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+                html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+                html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+                html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+                html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+                markdownPreview.innerHTML = html;
+            }
+        } catch (e) {
+            markdownPreview.innerHTML = `<div style="color: var(--accent-red); padding: 1em;">Preview error: ${e.message}</div>`;
+        }
+    }
+
+    function togglePreviewMode() {
+        if (!activeFilePath || !activeFilePath.endsWith(".md")) {
+            // Not a markdown file — cycle doesn't apply, but allow split for .md files only
+            if (previewMode !== "edit-only") {
+                previewMode = "edit-only";
+                editorSection.classList.remove("preview-only", "split-view");
+            }
+            previewBtn.textContent = "Preview";
+            previewBtn.title = "Preview only available for .md files (Ctrl+Shift+P)";
+            return;
+        }
+
+        // Cycle: edit-only -> split-view -> preview-only -> edit-only
+        // Button always shows the NEXT mode you'll switch to
+        if (previewMode === "edit-only") {
+            previewMode = "split-view";
+            editorSection.classList.remove("edit-only");
+            editorSection.classList.add("split-view");
+            previewBtn.textContent = "Full Preview";
+            previewBtn.title = "Switch to full preview-only (Ctrl+Shift+P)";
+        } else if (previewMode === "split-view") {
+            previewMode = "preview-only";
+            editorSection.classList.remove("split-view");
+            editorSection.classList.add("preview-only");
+            previewBtn.textContent = "Edit";
+            previewBtn.title = "Switch back to edit-only (Ctrl+Shift+P)";
+        } else {
+            previewMode = "edit-only";
+            editorSection.classList.remove("preview-only", "split-view");
+            editorSection.classList.add("edit-only");
+            previewBtn.textContent = "Split";
+            previewBtn.title = "Split view — editor + preview side by side (Ctrl+Shift+P)";
+        }
+
+        // Ensure preview is rendered when switching to preview modes
+        if (previewMode !== "edit-only") {
+            updateMarkdownPreview();
+        }
+    }
+
+    // Wire preview toggle
+    if (previewBtn) {
+        previewBtn.addEventListener("click", togglePreviewMode);
+    }
+
+    // ── New Document Workflow ──
+    async function createNewMarkdownDoc() {
+        const name = prompt("New markdown document name:", "untitled.md");
+        if (!name) return;
+        const docName = name.endsWith(".md") ? name : name + ".md";
+
+        // Generate timestamped frontmatter
+        const now = new Date();
+        const timestamp = now.toISOString().replace("T", " ").substring(0, 19);
+        const title = docName.replace(/\.md$/, "").replace(/[-_]/g, " ");
+        const content = `---
+title: "${title}"
+created: ${timestamp}
+status: draft
+---
+
+# ${title}
+
+`;
+
+        try {
+            const resp = await fetch("/api/files/write", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    path: docName,
+                    content: content
+                })
+            });
+            const data = await resp.json();
+            if (data.success) {
+                showNotification(`Created ${docName}`, "success");
+                loadWorkspaceTree();
+                // Open the file in the editor
+                openFile(docName);
+            } else {
+                alert(`Error creating document: ${data.detail || "Unknown"}`);
+            }
+        } catch (err) {
+            alert(`Network error: ${err.message}`);
+        }
+    }
+
+    if (newDocBtn) {
+        newDocBtn.addEventListener("click", createNewMarkdownDoc);
+    }
+
+    // ── Keyboard Shortcut: Ctrl+Shift+P for preview toggle ──
+    window.addEventListener("keydown", (e) => {
+        if ((e.ctrlKey || e.metaKey) && e.shiftKey && (e.key === "p" || e.key === "P")) {
+            e.preventDefault();
+            if (previewBtn) togglePreviewMode();
+        }
+    });
 
     // Save File Operation
     async function saveActiveFile() {
@@ -372,12 +540,155 @@ document.addEventListener("DOMContentLoaded", () => {
         window.addEventListener("keydown", safetyKeybinds);
     }
 
+    function addMessageToolbar(msgEl, type, options = {}) {
+        const toolbar = document.createElement("div");
+        toolbar.className = "message-toolbar";
+
+        if (type === "user") {
+            // Edit button
+            const editBtn = document.createElement("button");
+            editBtn.className = "msg-tool-btn";
+            editBtn.title = "Edit message";
+            editBtn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>`;
+            editBtn.addEventListener("click", () => {
+                chatInput.value = options.text || "";
+                chatInput.style.height = "auto";
+                chatInput.style.height = (chatInput.scrollHeight) + "px";
+                chatInput.focus();
+            });
+            toolbar.appendChild(editBtn);
+        }
+
+        if (type === "assistant") {
+            // Copy button
+            const copyBtn = document.createElement("button");
+            copyBtn.className = "msg-tool-btn";
+            copyBtn.title = "Copy message";
+            copyBtn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/></svg>`;
+            copyBtn.addEventListener("click", () => {
+                const text = msgEl.textContent;
+                navigator.clipboard.writeText(text).then(() => {
+                    copyBtn.classList.add("copy-feedback");
+                    setTimeout(() => copyBtn.classList.remove("copy-feedback"), 1200);
+                }).catch(() => {
+                    const ta = document.createElement("textarea");
+                    ta.value = text;
+                    document.body.appendChild(ta);
+                    ta.select();
+                    document.execCommand("copy");
+                    document.body.removeChild(ta);
+                });
+            });
+            toolbar.appendChild(copyBtn);
+
+            // Retry button
+            if (options.lastUserText) {
+                const retryBtn = document.createElement("button");
+                retryBtn.className = "msg-tool-btn";
+                retryBtn.title = "Retry — resend last message";
+                retryBtn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>`;
+                retryBtn.addEventListener("click", () => {
+                    chatInput.value = options.lastUserText;
+                    sendChatMessage();
+                });
+                toolbar.appendChild(retryBtn);
+            }
+
+            // Rate button — opens star + comment widget
+            const rateBtn = document.createElement("button");
+            rateBtn.className = "msg-tool-btn";
+            rateBtn.title = "Rate this response";
+            rateBtn.innerHTML = `<svg viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>`;
+            msgEl.appendChild(toolbar);
+
+            // Build feedback widget
+            const fw = document.createElement("div");
+            fw.className = "feedback-widget";
+            fw.innerHTML = `
+                <div class="star-row">
+                    ${[1,2,3,4,5].map(i => `<button class="star-btn" data-star="${i}">★</button>`).join("")}
+                    <span class="star-label">Tap to rate</span>
+                </div>
+                <textarea placeholder="Leave a note for Dora — what worked, what didn't, what you actually needed..." rows="2"></textarea>
+                <div class="feedback-actions">
+                    <button class="btn btn-secondary btn-sm feedback-cancel">Cancel</button>
+                    <button class="btn btn-success btn-sm feedback-submit" disabled>Submit</button>
+                </div>
+                <div class="feedback-submitted">✓ Feedback saved — Dora can read this.</div>
+            `;
+            msgEl.appendChild(fw);
+
+            let selectedStar = 0;
+
+            // Star interaction
+            fw.querySelectorAll(".star-btn").forEach(btn => {
+                btn.addEventListener("click", () => {
+                    selectedStar = parseInt(btn.dataset.star);
+                    fw.querySelectorAll(".star-btn").forEach((b, i) => {
+                        b.classList.toggle("active", i < selectedStar);
+                    });
+                    fw.querySelector(".star-label").textContent =
+                        ["", "Needs work", "Okay", "Good", "Great", "Perfect"][selectedStar];
+                    fw.querySelector(".feedback-submit").disabled = false;
+                });
+            });
+
+            // Rate button toggles widget
+            rateBtn.addEventListener("click", () => {
+                const isOpen = fw.classList.contains("open");
+                fw.classList.toggle("open");
+                rateBtn.classList.toggle("voted", !isOpen);
+            });
+
+            // Cancel
+            fw.querySelector(".feedback-cancel").addEventListener("click", () => {
+                fw.classList.remove("open");
+                rateBtn.classList.remove("voted");
+            });
+
+            // Submit
+            fw.querySelector(".feedback-submit").addEventListener("click", async () => {
+                const comment = fw.querySelector("textarea").value.trim();
+                const payload = {
+                    rating: selectedStar,
+                    comment: comment || "",
+                    message: msgEl.textContent.slice(0, 2000),
+                    timestamp: new Date().toISOString()
+                };
+                try {
+                    await fetch("/api/feedback", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(payload)
+                    });
+                } catch (e) {
+                    // Always show as saved — store locally next session
+                }
+                fw.querySelector(".feedback-submit").disabled = true;
+                fw.querySelector("textarea").disabled = true;
+                fw.querySelectorAll(".star-btn").forEach(b => b.style.pointerEvents = "none");
+                fw.querySelector(".feedback-actions").style.display = "none";
+                fw.querySelector(".feedback-submitted").classList.add("show");
+                rateBtn.classList.add("voted");
+            });
+
+            // Don't append toolbar here yet — it was already appended before the widget
+            return;
+        }
+
+        msgEl.appendChild(toolbar);
+    }
+
+    let lastUserMessageText = "";
+
     function finalizeSessionState() {
         if (currentAssistantBubble) {
             currentAssistantBubble.classList.remove("streaming");
             // Render markdown in the completed assistant bubble
             const raw = currentAssistantBubble.textContent;
             currentAssistantBubble.innerHTML = renderMarkdown(raw);
+            // Add action toolbar to assistant message
+            addMessageToolbar(currentAssistantBubble, "assistant", { lastUserText: lastUserMessageText });
             currentAssistantBubble = null;
         }
         // Hide stop bar
@@ -388,67 +699,67 @@ document.addEventListener("DOMContentLoaded", () => {
         loadWorkspaceTree(); // Automatically refresh file tree on session completion
     }
 
-    // Simple markdown renderer for assistant messages
-    function renderMarkdown(text) {
+    // Light renderer for user messages — escapes HTML, preserves line breaks, basic inline formatting
+    function renderUserMessage(text) {
         if (!text) return "";
-        // Escape HTML first
-        let html = text
-            .replace(/&/g, "&amp;")
-            .replace(/</g, "&lt;")
-            .replace(/>/g, "&gt;");
-        
-        // Code blocks (fenced) - must come before inline code
-        html = html.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
-        
-        // Inline code
+        // Escape HTML
+        let html = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        // Inline code (must come before other inline formatting)
         html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
-        
         // Bold and italic
         html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
         html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
         html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
-        
         // Links
         html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
-        
-        // Blockquotes
+        // Line breaks (two newlines = paragraph, single = <br>)
+        html = html.replace(/\n\n/g, '</p><p>');
+        html = html.replace(/\n/g, '<br>');
+        html = '<p>' + html + '</p>';
+        return html;
+    }
+
+    // Markdown renderer for assistant messages (uses marked if available)
+    function renderMarkdown(text) {
+        if (!text) return "";
+        if (typeof marked !== "undefined") {
+            marked.setOptions({ breaks: true, gfm: true });
+            return marked.parse(text);
+        }
+        // Fallback: simple rendering if marked isn't loaded
+        let html = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        html = html.replace(/```(\w*)\n([\s\S]*?)```/g, '<pre><code>$2</code></pre>');
+        html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+        html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+        html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+        html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+        html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
         html = html.replace(/^&gt;\s?(.*)$/gm, '<blockquote>$1</blockquote>');
-        
-        // Headings
         html = html.replace(/^#### (.+)$/gm, '<h4>$1</h4>');
         html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
         html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
         html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
-        
-        // Unordered lists
         html = html.replace(/^[\*\-]\s(.+)$/gm, '<li>$1</li>');
         html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
-        
-        // Ordered lists
         html = html.replace(/^\d+\.\s(.+)$/gm, '<li>$1</li>');
         html = html.replace(/(<li>.*<\/li>\n?)+/g, '<ol>$&</ol>');
-        
-        // Paragraphs - wrap remaining text in <p> tags
-        // Split by double newlines
         const paragraphs = html.split(/\n\n+/);
         html = paragraphs.map(p => {
             p = p.trim();
             if (!p) return "";
-            // Skip if already wrapped in block-level tags
             if (p.match(/^<(p|h[1-4]|ul|ol|li|blockquote|pre|div)/)) return p;
-            // Skip single lines that are list items or blockquotes
-            if (p.match(/^<(li|blockquote)/)) return p;
-            // Convert single newlines within paragraph to <br>
             p = p.replace(/\n/g, '<br>');
             return `<p>${p}</p>`;
         }).join("\n");
-        
         return html;
     }
 
     function sendChatMessage() {
         const text = chatInput.value.trim();
         if (!text) return;
+
+        // Store for retry
+        lastUserMessageText = text;
 
         // Block UI input
         chatInput.disabled = true;
@@ -462,8 +773,10 @@ document.addEventListener("DOMContentLoaded", () => {
         // Append user bubble to messages
         const userBubble = document.createElement("div");
         userBubble.className = "message user";
-        userBubble.textContent = text;
+        userBubble.innerHTML = renderUserMessage(text);
         chatMessages.appendChild(userBubble);
+        // Add edit toolbar to user message
+        addMessageToolbar(userBubble, "user", { text });
         chatMessages.scrollTop = chatMessages.scrollHeight;
 
         chatInput.value = "";
@@ -580,12 +893,17 @@ document.addEventListener("DOMContentLoaded", () => {
                             option.selected = true;
                         }
                         engineSelector.appendChild(option);
+
+                        // Mirror into embed selector
+                        if (engineSelectorEmbed) {
+                            const optionEmbed = option.cloneNode(true);
+                            engineSelectorEmbed.appendChild(optionEmbed);
+                        }
                     });
                 });
 
-                // Add change event listener
-                engineSelector.onchange = async () => {
-                    const selectedVal = engineSelector.value;
+                // Add change event listener (shared handler for both selectors)
+                async function handleEngineChange(selectedVal) {
                     if (!selectedVal || !currentConfig) return;
 
                     let providerName, modelName;
@@ -594,19 +912,19 @@ document.addEventListener("DOMContentLoaded", () => {
                         providerName = parsed.provider;
                         modelName = parsed.model;
                     } catch {
-                        // Fallback for legacy format
                         providerName = selectedVal;
                         modelName = currentConfig.api.providers[providerName]?.model || "";
                     }
 
                     if (!providerName) return;
 
-                    // Update the provider's model and routing
-                    if (currentConfig.api.providers[providerName]) {
-                        currentConfig.api.providers[providerName].model = modelName;
-                    }
+                    currentConfig.api.providers[providerName] && (currentConfig.api.providers[providerName].model = modelName);
                     currentConfig.api.routing.attunement_core = providerName;
                     currentConfig.api.routing.primary_orchestrator = providerName;
+
+                    // Sync both selectors to the same value
+                    if (engineSelector) engineSelector.value = selectedVal;
+                    if (engineSelectorEmbed) engineSelectorEmbed.value = selectedVal;
 
                     try {
                         const updateRes = await fetch("/api/config", {
@@ -623,7 +941,13 @@ document.addEventListener("DOMContentLoaded", () => {
                     } catch (err) {
                         alert(`Failed to update config: ${err.message}`);
                     }
-                };
+                }
+
+                // Add change event listener
+                engineSelector.onchange = () => handleEngineChange(engineSelector.value);
+                if (engineSelectorEmbed) {
+                    engineSelectorEmbed.onchange = () => handleEngineChange(engineSelectorEmbed.value);
+                }
             }
         } catch (err) {
             console.error("Failed to load engine list:", err);
@@ -633,11 +957,13 @@ document.addEventListener("DOMContentLoaded", () => {
                 currentConfig = await res.json();
                 if (currentConfig?.api?.providers) {
                     engineSelector.innerHTML = "";
+                    if (engineSelectorEmbed) engineSelectorEmbed.innerHTML = "";
                     Object.keys(currentConfig.api.providers).forEach(provName => {
                         const option = document.createElement("option");
                         option.value = provName;
                         option.textContent = `${provName} (${currentConfig.api.providers[provName].model || '?'})`;
                         engineSelector.appendChild(option);
+                        if (engineSelectorEmbed) engineSelectorEmbed.appendChild(option.cloneNode(true));
                     });
                 }
             } catch (fallbackErr) {
@@ -810,6 +1136,52 @@ document.addEventListener("DOMContentLoaded", () => {
                     isDragging = false;
                     document.body.style.cursor = "";
                     document.body.style.userSelect = "";
+                }
+            });
+        }
+
+        // Vertical split handle (editor vs preview in split-view)
+        const splitHandleV = document.getElementById("split-handle-v");
+        const editorContainer = document.querySelector(".editor-container");
+        if (splitHandleV && editorContainer) {
+            let vDragging = false;
+            let vStartX = 0;
+            let vLeftPct = 50;
+
+            // Restore saved split position if available
+            try {
+                const saved = localStorage.getItem("dg-split-v");
+                if (saved) vLeftPct = parseFloat(saved);
+            } catch(e) {}
+
+            splitHandleV.addEventListener("mousedown", (e) => {
+                vDragging = true;
+                vStartX = e.clientX;
+                document.body.style.cursor = "col-resize";
+                document.body.style.userSelect = "none";
+                splitHandleV.classList.add("active");
+            });
+
+            document.addEventListener("mousemove", (e) => {
+                if (!vDragging) return;
+                const containerRect = editorContainer.getBoundingClientRect();
+                const containerWidth = containerRect.width;
+                if (containerWidth <= 0) return;
+                const vPct = ((e.clientX - containerRect.left) / containerWidth) * 100;
+                vLeftPct = Math.max(20, Math.min(80, vPct));
+                const textarea = document.getElementById("code-textarea");
+                const preview = document.getElementById("markdown-preview");
+                if (textarea) textarea.style.flex = `1 1 ${vLeftPct}%`;
+                if (preview) preview.style.flex = `1 1 ${100 - vLeftPct}%`;
+            });
+
+            document.addEventListener("mouseup", () => {
+                if (vDragging) {
+                    vDragging = false;
+                    document.body.style.cursor = "";
+                    document.body.style.userSelect = "";
+                    splitHandleV.classList.remove("active");
+                    try { localStorage.setItem("dg-split-v", vLeftPct.toString()); } catch(e) {}
                 }
             });
         }

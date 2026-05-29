@@ -1,0 +1,46 @@
+{
+  "name": "deepgravity-chat",
+  "displayName": "DeepGravity Chat",
+  "description": "Agentic chat participant for DeepGravity. Reads backend address from DEEPGRAVITY_BACKEND_URL env var or deepgravity.backendUrl setting.",
+  "version": "0.1.0",
+  "publisher": "DeepGravity",
+  "license": "MIT",
+  "icon": "icon.png",
+  "engines": {
+    "vscode": "^1.121.0"
+  },
+  "categories": [
+    "Chat"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./src/extension.js",
+  "contributes": {
+    "chatParticipants": [
+      {
+        "id": "deepgravity.chat",
+        "fullName": "DeepGravity",
+        "name": "deepgravity",
+        "description": "Ask DeepGravity to read, write, or reason about your codebase.",
+        "commands": [
+          {
+            "name": "status",
+            "description": "Check backend connection status"
+          }
+        ]
+      }
+    ],
+    "configuration": {
+      "title": "DeepGravity",
+      "properties": {
+        "deepgravity.backendUrl": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "WebSocket URL of the DeepGravity backend (e.g., `http://192.168.0.32:19850`). If empty, falls back to `DEEPGRAVITY_BACKEND_URL` environment variable. If neither is set, chat will not connect."
+        }
+      }
+    }
+  },
+  "dependencies": {}
+}
