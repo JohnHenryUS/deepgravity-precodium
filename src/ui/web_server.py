@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import time
 import asyncio
 import threading
 import queue
@@ -319,8 +320,15 @@ def run_chat_worker():
                             }),
                             lp
                         )
+                    else:
+                        # WS died mid-stream — abort generation
+                        orchestrator._stop_requested = True
+                        # Drain remaining stream so the orchestrator cleans up
+                        for _ in stream:
+                            pass
+                        break
 
-                # Notify final session state
+                # Notify final session state (only if WS is still alive)
                 ws = active_websocket
                 lp = active_loop
                 if ws is not None and lp is not None:
@@ -328,6 +336,9 @@ def run_chat_worker():
                         ws.send_json({"type": "complete"}),
                         lp
                     )
+                elif orchestrator._stop_requested:
+                    # Reset the abort flag for the next message
+                    orchestrator._stop_requested = False
             except Exception as err:
                 ws = active_websocket
                 lp = active_loop
@@ -354,6 +365,17 @@ async def websocket_chat(websocket: WebSocket):
     orchestrator.guardrails.write_approval_callback = _resilient_write_approval
     orchestrator.guardrails.open_file_callback = _resilient_open_file
 
+    # On reconnect, push current conversation history to the frontend automatically
+    if hasattr(orchestrator, 'conversation_history') and orchestrator.conversation_history:
+        try:
+            history = orchestrator.conversation_history
+            await websocket.send_json({
+                "type": "session_restore",
+                "history": history
+            })
+        except Exception:
+            pass  # Non-critical — frontend can still load history from drawer
+
     # Start persistent background worker thread if not already running
     if global_worker_thread is None or not global_worker_thread.is_alive():
         global_worker_thread = threading.Thread(
@@ -361,6 +383,16 @@ async def websocket_chat(websocket: WebSocket):
             daemon=True
         )
         global_worker_thread.start()
+    # Start WebSocket heartbeat — sends a ping every 25s to keep the connection alive
+    async def _heartbeat(ws):
+        try:
+            while True:
+                await asyncio.sleep(25)
+                await ws.send_json({"type": "ping"})
+        except (WebSocketDisconnect, Exception):
+            pass
+
+    hb_task = asyncio.ensure_future(_heartbeat(websocket))
 
     try:
         while True:
@@ -426,6 +458,8 @@ async def websocket_chat(websocket: WebSocket):
     except WebSocketDisconnect:
         # Unblock thread if it was waiting for approval
         global_approval_queue.put(False)
+        # Clear active websocket so the worker thread stops sending into a dead socket
+        active_websocket = None
 
         if active_approval_queue == global_approval_queue:
             active_approval_queue = None
@@ -786,6 +820,20 @@ def contract_violations():
     """Get recent contract violations."""
     global orchestrator
     return {"violations": orchestrator._contract_violation_buffer[-20:]}
+
+@app.get("/api/health")
+async def health_check():
+    """Lightweight health endpoint for the VSCode extension to poll."""
+    depth = getattr(orchestrator, 'depth_level', 'S')
+    keystore_unlocked = getattr(orchestrator, '_keystore_unlocked', False)
+    ws_alive = active_websocket is not None
+    return {
+        "status": "ok",
+        "ws_connected": ws_alive,
+        "depth": depth,
+        "keystore_unlocked": keystore_unlocked,
+        "session_id": getattr(orchestrator, 'current_session_id', None)
+    }
 
 @app.websocket("/ws/logs")
 async def websocket_logs(websocket: WebSocket):

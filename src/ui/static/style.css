@@ -203,6 +203,29 @@ body {
     flex-grow: 1;
 }
 
+/* Chat pane WebSocket indicator dot */
+.chat-ws-indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+    flex-shrink: 0;
+    transition: background 0.3s, box-shadow 0.3s;
+}
+.chat-ws-indicator.connected {
+    background: var(--accent-green);
+    box-shadow: 0 0 6px var(--accent-green);
+}
+.chat-ws-indicator.connecting {
+    background: var(--accent-yellow);
+    box-shadow: 0 0 6px var(--accent-yellow);
+    animation: pulse-glow 1s infinite;
+}
+.chat-ws-indicator.disconnected {
+    background: var(--accent-red);
+    box-shadow: 0 0 6px var(--accent-red);
+}
+
 .pane-header-actions {
     display: flex;
     align-items: center;

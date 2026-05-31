@@ -5,6 +5,8 @@ import { ModeSwitcher } from './commands/modeSwitcher';
 let doraChat: DoraChatPanel | undefined;
 let modeSwitcher: ModeSwitcher | undefined;
 let statusBarItem: vscode.StatusBarItem | undefined = undefined;
+let wsStatusItem: vscode.StatusBarItem | undefined = undefined;
+let healthPollInterval: NodeJS.Timeout | undefined = undefined;
 
 export function activate(context: vscode.ExtensionContext) {
     console.log('DeepGravity Core activating...');
@@ -17,7 +19,7 @@ export function activate(context: vscode.ExtensionContext) {
         )
     );
 
-    // ── Status bar mode indicator ──
+    // ── Status bar mode indicator (right side) ──
     const sb = vscode.window.createStatusBarItem(
         vscode.StatusBarAlignment.Right,
         100
@@ -32,6 +34,42 @@ export function activate(context: vscode.ExtensionContext) {
     modeSwitcher = new ModeSwitcher(sb);
     context.subscriptions.push(modeSwitcher);
     statusBarItem = sb;
+
+    // ── WebSocket health indicator (left side) ──
+    const wsSb = vscode.window.createStatusBarItem(
+        vscode.StatusBarAlignment.Left,
+        0
+    );
+    wsSb.text = "$(circle-slash) Dora";
+    wsSb.tooltip = "DeepGravity — Backend status unknown";
+    wsSb.show();
+    context.subscriptions.push(wsSb);
+    wsStatusItem = wsSb;
+
+    // Poll backend health every 10 seconds
+    async function pollHealth() {
+        try {
+            const resp = await fetch('http://127.0.0.1:19850/api/health');
+            if (!resp.ok) { throw new Error('HTTP ' + resp.status); }
+            const data = await resp.json();
+            if (data.ws_connected) {
+                wsSb.text = "$(circle-filled) Dora";
+                wsSb.tooltip = "DeepGravity — Backend connected";
+                wsSb.color = '#4ec9b0';
+            } else {
+                wsSb.text = "$(debug-disconnect) Dora";
+                wsSb.tooltip = "DeepGravity — Backend running, no chat WebSocket";
+                wsSb.color = '#dcdcaa';
+            }
+        } catch (e: any) {
+            wsSb.text = "$(circle-slash) Dora";
+            wsSb.tooltip = "DeepGravity — Backend unreachable: " + (e.message || 'unknown');
+            wsSb.color = '#f44747';
+        }
+    }
+    pollHealth();
+    healthPollInterval = setInterval(pollHealth, 10000);
+    context.subscriptions.push({ dispose: () => { if (healthPollInterval) clearInterval(healthPollInterval); } });
 
     // ── Commands ──
     context.subscriptions.push(

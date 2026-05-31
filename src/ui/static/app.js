@@ -363,6 +363,24 @@ status: draft
     });
 
     // 2. WebSocket & Agent Chat Operations
+
+    // Lightweight in-page WS indicator for standalone browser use
+    function updateChatWsIndicator(state) {
+        const dot = document.getElementById("chat-ws-indicator");
+        if (!dot) return;
+        dot.className = "chat-ws-indicator";
+        if (state === "connected") {
+            dot.classList.add("connected");
+            dot.title = "WebSocket connected";
+        } else if (state === "connecting") {
+            dot.classList.add("connecting");
+            dot.title = "WebSocket connecting...";
+        } else {
+            dot.classList.add("disconnected");
+            dot.title = "WebSocket disconnected";
+        }
+    }
+
     function connectWebSocket() {
         const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
         const wsUrl = `${protocol}//${window.location.host}/ws/chat`;
@@ -371,13 +389,16 @@ status: draft
 
         websocket.onopen = () => {
             console.log("[WebSocket] Connection live.");
+            updateChatWsIndicator("connected");
         };
 
         websocket.onmessage = (event) => {
             const msg = jsonParseSafe(event.data);
             if (!msg) return;
 
-            if (msg.type === "stream") {
+            if (msg.type === "ping") {
+                return;  // heartbeat keepalive — no action needed
+            } else if (msg.type === "stream") {
                 handleStreamChunk(msg.data);
             } else if (msg.type === "approval_required") {
                 handleApprovalRequired(msg);
@@ -388,6 +409,11 @@ status: draft
                 }
             } else if (msg.type === "complete") {
                 finalizeSessionState();
+            } else if (msg.type === "session_restore") {
+                // Auto-load conversation history after reconnect
+                if (msg.history && Array.isArray(msg.history)) {
+                    renderConversation(msg.history);
+                }
             } else if (msg.type === "error") {
                 const errMsg = msg.message || "";
                 // Catch configuration/auth errors and give clear instructions
@@ -406,8 +432,14 @@ status: draft
 
         websocket.onclose = () => {
             console.warn("[WebSocket] Socket closed. Reconnecting in 3s...");
+            updateChatWsIndicator("disconnected");
+            // Re-enable input so the user can send again when the new socket comes up
+            finalizeSessionState();
             setTimeout(connectWebSocket, 3000);
         };
+
+        // Show connecting state immediately
+        updateChatWsIndicator("connecting");
     }
 
     function handleStreamChunk(chunk) {
@@ -704,21 +736,24 @@ status: draft
     let lastUserMessageText = "";
 
     function finalizeSessionState() {
-        if (currentAssistantBubble) {
-            currentAssistantBubble.classList.remove("streaming");
-            // Render markdown in the completed assistant bubble
-            const raw = currentAssistantBubble.textContent;
-            currentAssistantBubble.innerHTML = renderMarkdown(raw);
-            // Add action toolbar to assistant message
-            addMessageToolbar(currentAssistantBubble, "assistant", { lastUserText: lastUserMessageText });
-            currentAssistantBubble = null;
+        try {
+            if (currentAssistantBubble) {
+                currentAssistantBubble.classList.remove("streaming");
+                const raw = currentAssistantBubble.textContent;
+                currentAssistantBubble.innerHTML = renderMarkdown(raw);
+                addMessageToolbar(currentAssistantBubble, "assistant", { lastUserText: lastUserMessageText });
+                currentAssistantBubble = null;
+            }
+            if (stopBar) stopBar.style.display = "none";
+        } catch (e) {
+            console.warn("finalizeSessionState error:", e);
+        } finally {
+            // Always re-enable input — no exception can leave it locked
+            chatInput.disabled = false;
+            chatSendBtn.disabled = false;
+            chatInput.focus();
+            loadWorkspaceTree();
         }
-        // Hide stop bar
-        if (stopBar) stopBar.style.display = "none";
-        chatInput.disabled = false;
-        chatSendBtn.disabled = false;
-        chatInput.focus();
-        loadWorkspaceTree(); // Automatically refresh file tree on session completion
     }
 
     // Light renderer for user messages — escapes HTML, preserves line breaks, basic inline formatting
