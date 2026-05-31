@@ -15,7 +15,15 @@
         "api_key": "",
         "model": "llama3:latest",
         "temperature": 0.7,
+        "public_stratum": true,
         "preserve_keys": []
+      },
+      "local-model": {
+        "base_url": "{server_location}",
+        "api_key": "",
+        "model": "dolphin3:latest",
+        "temperature": 0.7,
+        "public_stratum": false
       }
     }
   },
@@ -29,6 +37,13 @@
     "dora_core_path": "",
     "dora_core_backup": "config/system_prompt.txt",
     "user_global_rules_backup": "config/user_global_rules.txt"
+  },
+  "watchtower": {
+    "enabled": true,
+    "ping_interval": 120,
+    "max_idle_pings": 15,
+    "task_stuck_threshold": 600,
+    "mode": "auto"
   },
   "safety": {
     "require_confirmation_for_writes": true,

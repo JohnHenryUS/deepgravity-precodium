@@ -28,6 +28,18 @@ document.addEventListener("DOMContentLoaded", () => {
     const safetyDenyBtn = document.getElementById("safety-deny-btn");
     const engineSelector = document.getElementById("engine-selector");
     const engineSelectorEmbed = document.getElementById("engine-selector-embed");
+
+    // Privacy Gate Portal Bindings
+    const privacyGatePortal = document.getElementById("privacy-gate-portal");
+    const privacyGateEngineName = document.getElementById("privacy-gate-engine-name");
+    const privacyGateStatusText = document.getElementById("privacy-gate-status-text");
+    const privacyGateDesc = document.getElementById("privacy-gate-desc");
+    const privacyGateToggleBtn = document.getElementById("privacy-gate-toggle-btn");
+    const privacyGateAbortBtn = document.getElementById("privacy-gate-abort-btn");
+    const privacyGateConfirmBtn = document.getElementById("privacy-gate-confirm-btn");
+    const privacyGateCard = document.querySelector(".privacy-gate-card");
+    const privacyGateTitle = document.getElementById("privacy-gate-title");
+
     const previewBtn = document.getElementById("btn-toggle-preview");
     const markdownPreview = document.getElementById("markdown-preview");
     const newDocBtn = document.getElementById("btn-new-doc");
@@ -351,6 +363,24 @@ status: draft
     });
 
     // 2. WebSocket & Agent Chat Operations
+
+    // Lightweight in-page WS indicator for standalone browser use
+    function updateChatWsIndicator(state) {
+        const dot = document.getElementById("chat-ws-indicator");
+        if (!dot) return;
+        dot.className = "chat-ws-indicator";
+        if (state === "connected") {
+            dot.classList.add("connected");
+            dot.title = "WebSocket connected";
+        } else if (state === "connecting") {
+            dot.classList.add("connecting");
+            dot.title = "WebSocket connecting...";
+        } else {
+            dot.classList.add("disconnected");
+            dot.title = "WebSocket disconnected";
+        }
+    }
+
     function connectWebSocket() {
         const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
         const wsUrl = `${protocol}//${window.location.host}/ws/chat`;
@@ -359,13 +389,16 @@ status: draft
 
         websocket.onopen = () => {
             console.log("[WebSocket] Connection live.");
+            updateChatWsIndicator("connected");
         };
 
         websocket.onmessage = (event) => {
             const msg = jsonParseSafe(event.data);
             if (!msg) return;
 
-            if (msg.type === "stream") {
+            if (msg.type === "ping") {
+                return;  // heartbeat keepalive — no action needed
+            } else if (msg.type === "stream") {
                 handleStreamChunk(msg.data);
             } else if (msg.type === "approval_required") {
                 handleApprovalRequired(msg);
@@ -376,6 +409,11 @@ status: draft
                 }
             } else if (msg.type === "complete") {
                 finalizeSessionState();
+            } else if (msg.type === "session_restore") {
+                // Auto-load conversation history after reconnect
+                if (msg.history && Array.isArray(msg.history)) {
+                    renderConversation(msg.history);
+                }
             } else if (msg.type === "error") {
                 const errMsg = msg.message || "";
                 // Catch configuration/auth errors and give clear instructions
@@ -394,8 +432,14 @@ status: draft
 
         websocket.onclose = () => {
             console.warn("[WebSocket] Socket closed. Reconnecting in 3s...");
+            updateChatWsIndicator("disconnected");
+            // Re-enable input so the user can send again when the new socket comes up
+            finalizeSessionState();
             setTimeout(connectWebSocket, 3000);
         };
+
+        // Show connecting state immediately
+        updateChatWsIndicator("connecting");
     }
 
     function handleStreamChunk(chunk) {
@@ -692,21 +736,24 @@ status: draft
     let lastUserMessageText = "";
 
     function finalizeSessionState() {
-        if (currentAssistantBubble) {
-            currentAssistantBubble.classList.remove("streaming");
-            // Render markdown in the completed assistant bubble
-            const raw = currentAssistantBubble.textContent;
-            currentAssistantBubble.innerHTML = renderMarkdown(raw);
-            // Add action toolbar to assistant message
-            addMessageToolbar(currentAssistantBubble, "assistant", { lastUserText: lastUserMessageText });
-            currentAssistantBubble = null;
+        try {
+            if (currentAssistantBubble) {
+                currentAssistantBubble.classList.remove("streaming");
+                const raw = currentAssistantBubble.textContent;
+                currentAssistantBubble.innerHTML = renderMarkdown(raw);
+                addMessageToolbar(currentAssistantBubble, "assistant", { lastUserText: lastUserMessageText });
+                currentAssistantBubble = null;
+            }
+            if (stopBar) stopBar.style.display = "none";
+        } catch (e) {
+            console.warn("finalizeSessionState error:", e);
+        } finally {
+            // Always re-enable input — no exception can leave it locked
+            chatInput.disabled = false;
+            chatSendBtn.disabled = false;
+            chatInput.focus();
+            loadWorkspaceTree();
         }
-        // Hide stop bar
-        if (stopBar) stopBar.style.display = "none";
-        chatInput.disabled = false;
-        chatSendBtn.disabled = false;
-        chatInput.focus();
-        loadWorkspaceTree(); // Automatically refresh file tree on session completion
     }
 
     // Light renderer for user messages — escapes HTML, preserves line breaks, basic inline formatting
@@ -930,6 +977,9 @@ status: draft
                     if (engineSelectorEmbed) engineSelectorEmbed.value = finalVal;
                 }
 
+                // Track previous selection for revert on cancel
+                let prevSelectedVal = engineSelector.value || engineSelectorEmbed?.value || "";
+
                 // Add change event listener (shared handler for both selectors)
                 async function handleEngineChange(selectedVal) {
                     if (!selectedVal || !currentConfig) return;
@@ -946,29 +996,122 @@ status: draft
 
                     if (!providerName) return;
 
-                    currentConfig.api.providers[providerName] && (currentConfig.api.providers[providerName].model = modelName);
-                    currentConfig.api.routing.attunement_core = providerName;
-                    currentConfig.api.routing.primary_orchestrator = providerName;
-
-                    // Sync both selectors to the same value
-                    if (engineSelector) engineSelector.value = selectedVal;
-                    if (engineSelectorEmbed) engineSelectorEmbed.value = selectedVal;
-
+                    // Fetch latest privacy registry
+                    let registry = {};
                     try {
-                        const updateRes = await fetch("/api/config", {
-                            method: "POST",
-                            headers: { "Content-Type": "application/json" },
-                            body: JSON.stringify(currentConfig)
-                        });
-                        const updateData = await updateRes.json();
-                        if (updateData.success) {
-                            showNotification(`Switched to ${providerName} :: ${modelName}`, "success");
-                        } else {
-                            alert(`Failed to switch engine: ${updateData.detail || "Unknown error"}`);
-                        }
-                    } catch (err) {
-                        alert(`Failed to update config: ${err.message}`);
+                        const privacyRes = await fetch("/api/model-privacy");
+                        const privacyData = await privacyRes.json();
+                        registry = privacyData.models || {};
+                    } catch (e) {
+                        console.warn("Model privacy check failed:", e);
                     }
+
+                    // Determine current stratum state
+                    let stratum = "public";
+                    if (registry && registry[modelName]) {
+                        stratum = registry[modelName].stratum;
+                    } else if (modelName) {
+                        // Naming fallback
+                        stratum = modelName.toLowerCase().includes("dora") ? "private" : "public";
+                    }
+
+                    // Update modal UI with initial values
+                    privacyGateEngineName.textContent = modelName || providerName;
+                    
+                    function updateModalUI(currentStratum) {
+                        if (currentStratum === "private") {
+                            privacyGateCard.classList.remove("public-warning");
+                            privacyGateStatusText.textContent = "PRIVATE (Local / Self-Hosted)";
+                            privacyGateStatusText.style.color = "var(--accent-green)";
+                            privacyGateTitle.textContent = "ENGINE PRIVACY VERIFIED";
+                            privacyGateDesc.textContent = 
+                                `This model runs on local/private infrastructure (your iron, no data leaves your network).\n\n` +
+                                `Perfect for somatic engagement, private codebases, and sensitive discussions.`;
+                        } else {
+                            privacyGateCard.classList.add("public-warning");
+                            privacyGateStatusText.textContent = "PUBLIC (Cloud-Hosted)";
+                            privacyGateStatusText.style.color = "var(--accent-red)";
+                            privacyGateTitle.textContent = "PUBLIC STRATUM WARNING";
+                            privacyGateDesc.textContent = 
+                                `⚠️ WARNING: This engine routes through a public cloud provider. ` +
+                                `Data is processed on third-party servers subject to their terms of service.\n\n` +
+                                `This may include: content monitoring, data retention, automated flagging, ` +
+                                `and account-level consequences for policy violations.`;
+                        }
+                    }
+
+                    updateModalUI(stratum);
+                    privacyGatePortal.classList.add("show");
+
+                    // Clean event handlers before binding
+                    privacyGateToggleBtn.onclick = null;
+                    privacyGateAbortBtn.onclick = null;
+                    privacyGateConfirmBtn.onclick = null;
+
+                    // Handle Toggle button click
+                    privacyGateToggleBtn.onclick = () => {
+                        stratum = stratum === "private" ? "public" : "private";
+                        updateModalUI(stratum);
+                    };
+
+                    // Handle Abort button click
+                    privacyGateAbortBtn.onclick = () => {
+                        privacyGatePortal.classList.remove("show");
+                        // Revert to previous selection
+                        if (engineSelector) engineSelector.value = prevSelectedVal;
+                        if (engineSelectorEmbed) engineSelectorEmbed.value = prevSelectedVal;
+                    };
+
+                    // Handle Confirm button click
+                    privacyGateConfirmBtn.onclick = async () => {
+                        privacyGatePortal.classList.remove("show");
+                        
+                        // 1. Save classification entry to registry
+                        try {
+                            await fetch("/api/model-privacy", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                    model: modelName,
+                                    stratum: stratum,
+                                    source: providerName
+                                })
+                            });
+                            showNotification(
+                                `'${modelName}' registered as ${stratum}.`,
+                                stratum === "private" ? "success" : "warning"
+                            );
+                        } catch (e) {
+                            console.error("Failed to save privacy stratum:", e);
+                        }
+
+                        // 2. Commit engine switch
+                        prevSelectedVal = selectedVal;
+
+                        currentConfig.api.providers[providerName] && (currentConfig.api.providers[providerName].model = modelName);
+                        currentConfig.api.routing.attunement_core = providerName;
+                        currentConfig.api.routing.primary_orchestrator = providerName;
+
+                        // Sync selectors
+                        if (engineSelector) engineSelector.value = selectedVal;
+                        if (engineSelectorEmbed) engineSelectorEmbed.value = selectedVal;
+
+                        try {
+                            const updateRes = await fetch("/api/config", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify(currentConfig)
+                            });
+                            const updateData = await updateRes.json();
+                            if (updateData.success) {
+                                showNotification(`Switched to ${providerName} :: ${modelName}`, "success");
+                            } else {
+                                alert(`Failed to switch engine: ${updateData.detail || "Unknown error"}`);
+                            }
+                        } catch (err) {
+                            alert(`Failed to update config: ${err.message}`);
+                        }
+                    };
                 }
 
                 // Add change event listener
@@ -1776,9 +1919,331 @@ status: draft
             .replace(/'/g, "&#039;");
     }
 
+    // ── Depth Dial ──
+    async function initDepthDial() {
+        const dial = document.getElementById("depth-dial");
+        if (!dial) return;
+
+        async function refreshDepth() {
+            try {
+                const res = await fetch("/api/depth");
+                const data = await res.json();
+                const level = data.level || "S";
+                dial.querySelectorAll(".depth-btn").forEach(btn => {
+                    btn.classList.toggle("active", btn.dataset.depth === level);
+                });
+                updateEncryptionBadge(level, data.keystore_unlocked);
+            } catch (e) {
+                console.warn("Failed to fetch depth:", e);
+            }
+        }
+
+        function updateEncryptionBadge(level, keystoreUnlocked) {
+            const badge = document.getElementById("encryption-badge");
+            if (!badge) return;
+            if (level === "T" && keystoreUnlocked) {
+                badge.textContent = "🔒 Encrypted";
+                badge.className = "encryption-badge encrypted";
+            } else {
+                badge.textContent = "📄 Plaintext";
+                badge.className = "encryption-badge";
+            }
+        }
+
+        await refreshDepth();
+
+        dial.querySelectorAll(".depth-btn").forEach(btn => {
+            btn.addEventListener("click", async () => {
+                const depth = btn.dataset.depth;
+                try {
+                    // Warning modal: if targeting T (encrypted) with keystore unlocked, ask for confirmation
+                    if (depth === "T") {
+                        try {
+                            const ksRes = await fetch("/api/keystore/status");
+                            const ksStatus = await ksRes.json();
+                            if (ksStatus.exists && ksStatus.unlocked) {
+                                const labels = {"S":"Safe","M":"Mature","A":"Adult","R":"Reserved","T":"Trusted"};
+                                if (!confirm(
+                                    `Switch to ${labels[depth]} (${depth}) mode?\n\n` +
+                                    "This will start a new encrypted chat surface. " +
+                                    "Your current conversation will be saved and " +
+                                    "restored when you leave Trusted mode.\n\n" +
+                                    "Cancel to stay in the current surface."
+                                )) {
+                                    // Reset the active button display and abort
+                                    await refreshDepth();
+                                    return;
+                                }
+                            }
+                        } catch (e) {
+                            // If keystore check fails, continue anyway
+                            console.warn("Keystore status check failed:", e);
+                        }
+                    }
+
+                    const res = await fetch("/api/depth", {
+                        method: "POST",
+                        headers: {"Content-Type": "application/json"},
+                        body: JSON.stringify({level: depth})
+                    });
+                    if (!res.ok) {
+                        const err = await res.json();
+                        appendSystemMessage("⚠️ " + (err.detail || "Depth change rejected"), "system");
+                        await refreshDepth();
+                        return;
+                    }
+                    const result = await res.json();
+                    dial.querySelectorAll(".depth-btn").forEach(b => {
+                        b.classList.toggle("active", b.dataset.depth === result.level);
+                    });
+                    updateEncryptionBadge(result.level, result.keystore_unlocked);
+                    const labels = {"S":"Safe","M":"Mature","A":"Adult","R":"Reserved","T":"Trusted"};
+
+                    // Surface swap: clear chat UI when backend switched surfaces
+                    if (result.surface_swapped) {
+                        chatMessages.innerHTML = "";
+                        currentAssistantBubble = null;
+                        currentToolboxContainer = null;
+                        activeToolCards = {};
+                        appendSystemMessage(
+                            "🔄 Surface swapped. New session: " + (result.new_session_id || "unknown"),
+                            "system"
+                        );
+                    }
+
+                    appendSystemMessage(
+                        "🎛️ Depth set to " + labels[result.level] + " (" + result.level + ")",
+                        "system"
+                    );
+                    // If T was set, check keystore
+                    if (result.level === "T") {
+                        checkKeystoreAndPrompt();
+                    }
+                } catch (e) {
+                    console.error("Depth change failed:", e);
+                }
+            });
+        });
+    }
+
+    // ── Keystore Modals ──
+    async function checkKeystoreAndPrompt() {
+        try {
+            const res = await fetch("/api/keystore/status");
+            const status = await res.json();
+            if (!status.exists) {
+                openKeystoreSetup();
+            } else if (!status.unlocked) {
+                openKeystoreUnlock();
+            }
+        } catch (e) {
+            console.warn("Keystore status check failed:", e);
+        }
+    }
+
+    let ksCurrentStep = 1;
+    let ksRecoveryPhrase = "";
+    let ksConfirmWord = "";
+    let ksSurfaceSwapped = false;
+    let ksNewSessionId = null;
+
+    function openKeystoreSetup() {
+        ksCurrentStep = 1;
+        ksRecoveryPhrase = "";
+        ksSurfaceSwapped = false;
+        ksNewSessionId = null;
+        document.getElementById("ks-step-1").style.display = "block";
+        document.getElementById("ks-step-2").style.display = "none";
+        document.getElementById("ks-step-3").style.display = "none";
+        document.getElementById("ks-passphrase").value = "";
+        document.getElementById("ks-passphrase-confirm").value = "";
+        document.getElementById("ks-confirm-input").value = "";
+        document.getElementById("ks-error-1").textContent = "";
+        document.getElementById("ks-error-3").textContent = "";
+        document.getElementById("ks-next-btn").textContent = "Next";
+        document.getElementById("keystore-setup-portal").style.display = "flex";
+    }
+
+    function closeKeystoreSetup() {
+        document.getElementById("keystore-setup-portal").style.display = "none";
+    }
+
+    function openKeystoreUnlock() {
+        document.getElementById("ku-passphrase").value = "";
+        document.getElementById("ku-recovery").value = "";
+        document.getElementById("ku-error").textContent = "";
+        document.getElementById("ku-passphrase-field").style.display = "block";
+        document.getElementById("ku-recovery-field").style.display = "none";
+        document.getElementById("ku-toggle-method").textContent = "Use recovery phrase instead";
+        document.getElementById("keystore-unlock-portal").style.display = "flex";
+    }
+
+    function closeKeystoreUnlock() {
+        document.getElementById("keystore-unlock-portal").style.display = "none";
+    }
+
+    function initKeystoreModals() {
+        // Setup: Next button handler
+        document.getElementById("ks-next-btn").addEventListener("click", async () => {
+            if (ksCurrentStep === 1) {
+                const pp = document.getElementById("ks-passphrase").value;
+                const pp2 = document.getElementById("ks-passphrase-confirm").value;
+                if (!pp || pp.length < 1) {
+                    document.getElementById("ks-error-1").textContent = "Passphrase cannot be empty.";
+                    return;
+                }
+                if (pp !== pp2) {
+                    document.getElementById("ks-error-1").textContent = "Passphrases do not match.";
+                    return;
+                }
+                document.getElementById("ks-error-1").textContent = "";
+                try {
+                    const res = await fetch("/api/keystore/setup", {
+                        method: "POST",
+                        headers: {"Content-Type": "application/json"},
+                        body: JSON.stringify({passphrase: pp})
+                    });
+                    if (!res.ok) {
+                        const err = await res.json();
+                        document.getElementById("ks-error-1").textContent = err.detail || "Setup failed";
+                        return;
+                    }
+                    const result = await res.json();
+                    ksRecoveryPhrase = result.recovery_phrase || "";
+                    ksSurfaceSwapped = result.surface_swapped || false;
+                    ksNewSessionId = result.new_session_id || null;
+                    // Show step 2
+                    document.getElementById("ks-step-1").style.display = "none";
+                    document.getElementById("ks-step-2").style.display = "block";
+                    document.getElementById("ks-recovery-phrase").textContent = ksRecoveryPhrase;
+                    ksCurrentStep = 2;
+                    document.getElementById("ks-next-btn").textContent = "Next";
+                } catch (e) {
+                    document.getElementById("ks-error-1").textContent = "Network error: " + e.message;
+                }
+            } else if (ksCurrentStep === 2) {
+                // Move to confirmation step
+                document.getElementById("ks-step-2").style.display = "none";
+                document.getElementById("ks-step-3").style.display = "block";
+                const words = ksRecoveryPhrase.split(" ");
+                ksConfirmWord = words[Math.floor(Math.random() * words.length)];
+                document.getElementById("ks-confirm-word").textContent = ksConfirmWord;
+                ksCurrentStep = 3;
+                document.getElementById("ks-next-btn").textContent = "Confirm";
+            } else if (ksCurrentStep === 3) {
+                const typed = document.getElementById("ks-confirm-input").value.trim();
+                if (typed.toLowerCase() !== ksConfirmWord.toLowerCase()) {
+                    document.getElementById("ks-error-3").textContent = "Word does not match. Try again.";
+                    return;
+                }
+                document.getElementById("ks-error-3").textContent = "";
+                closeKeystoreSetup();
+                if (ksSurfaceSwapped) {
+                    chatMessages.innerHTML = "";
+                    currentAssistantBubble = null;
+                    currentToolboxContainer = null;
+                    activeToolCards = {};
+                    appendSystemMessage(
+                        "🔄 Surface swapped. New encrypted session: " + (ksNewSessionId || "unknown"),
+                        "system"
+                    );
+                    ksSurfaceSwapped = false;
+                    ksNewSessionId = null;
+                }
+                await refreshDepth();
+                appendSystemMessage("🔐 Keystore created and unlocked. X-mode encryption active.", "system");
+            }
+        });
+
+        // Setup: Cancel
+        document.getElementById("ks-cancel-btn").addEventListener("click", closeKeystoreSetup);
+
+        // Setup: Show again
+        document.getElementById("ks-show-again").addEventListener("click", () => {
+            alert("Your recovery phrase:\n\n" + ksRecoveryPhrase + "\n\nStore it safely. This is your only backup.");
+        });
+
+        // Setup: I've saved it
+        document.getElementById("ks-saved").addEventListener("click", () => {
+            document.getElementById("ks-step-2").style.display = "none";
+            document.getElementById("ks-step-3").style.display = "block";
+            const words = ksRecoveryPhrase.split(" ");
+            ksConfirmWord = words[Math.floor(Math.random() * words.length)];
+            document.getElementById("ks-confirm-word").textContent = ksConfirmWord;
+            ksCurrentStep = 3;
+            document.getElementById("ks-next-btn").textContent = "Confirm";
+        });
+
+        // Unlock: Toggle method
+        document.getElementById("ku-toggle-method").addEventListener("click", () => {
+            const ppField = document.getElementById("ku-passphrase-field");
+            const recField = document.getElementById("ku-recovery-field");
+            const toggle = document.getElementById("ku-toggle-method");
+            if (ppField.style.display !== "none") {
+                ppField.style.display = "none";
+                recField.style.display = "block";
+                toggle.textContent = "Use passphrase instead";
+            } else {
+                ppField.style.display = "block";
+                recField.style.display = "none";
+                toggle.textContent = "Use recovery phrase instead";
+            }
+        });
+
+        // Unlock: Cancel
+        document.getElementById("ku-cancel-btn").addEventListener("click", closeKeystoreUnlock);
+
+        // Unlock: Unlock button
+        document.getElementById("ku-unlock-btn").addEventListener("click", async () => {
+            const ppField = document.getElementById("ku-passphrase-field");
+            const isRecovery = ppField.style.display === "none";
+            const payload = {};
+            if (isRecovery) {
+                payload.recovery_phrase = document.getElementById("ku-recovery").value;
+            } else {
+                payload.passphrase = document.getElementById("ku-passphrase").value;
+            }
+            if (!payload.passphrase && !payload.recovery_phrase) {
+                document.getElementById("ku-error").textContent = "Enter a passphrase or recovery phrase.";
+                return;
+            }
+            document.getElementById("ku-error").textContent = "";
+            try {
+                const res = await fetch("/api/keystore/unlock", {
+                    method: "POST",
+                    headers: {"Content-Type": "application/json"},
+                    body: JSON.stringify(payload)
+                });
+                if (!res.ok) {
+                    const err = await res.json();
+                    document.getElementById("ku-error").textContent = err.detail || "Unlock failed";
+                    return;
+                }
+                const unlockResult = await res.json();
+                closeKeystoreUnlock();
+                if (unlockResult.surface_swapped) {
+                    chatMessages.innerHTML = "";
+                    currentAssistantBubble = null;
+                    currentToolboxContainer = null;
+                    activeToolCards = {};
+                    appendSystemMessage(
+                        "🔄 Surface swapped. New encrypted session: " + (unlockResult.new_session_id || "unknown"),
+                        "system"
+                    );
+                }
+                await refreshDepth();
+                appendSystemMessage("🔓 Keystore unlocked. X-mode encryption active.", "system");
+            } catch (e) {
+                document.getElementById("ku-error").textContent = "Network error: " + e.message;
+            }
+        });
+    }
+
     // Startup Init
     loadWorkspaceTree();
     connectWebSocket();
     initEngineSelector();
     initPhase4Console();
+    initDepthDial();
+    initKeystoreModals();
 });

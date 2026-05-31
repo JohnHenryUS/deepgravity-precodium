@@ -1,13 +1,19 @@
 import os
 import json
+import base64
 import time
+import traceback
 from typing import Dict, List, Any, Optional, Tuple, Generator
 from src.providers.openai_compat import OpenAICompatProvider
 from src.tools.file_ops import FileOperations
 from src.tools.shell import ShellCommandRunner
 from src.tools.search import SearchOperations
 from src.tools.task_manager import TaskManager
+from src.tools.web_search import WebSearch
+from src.tools.vision import VisionAnalysis
 from src.safety import SafetyGuardrails
+from src import keystore
+from src.tool_cache import ToolResultCache
 from src.contract import (
     ContractMonitor, ContractViolation, WorkContract,
     ContractParser, build_contract_from_request
@@ -35,6 +41,8 @@ class DeepGravityOrchestrator:
         self.file_ops = FileOperations(self.guardrails)
         self.shell_runner = ShellCommandRunner(self.guardrails)
         self.search_ops = SearchOperations()
+        self.web_search = WebSearch()
+        self.vision = VisionAnalysis()
         
         # Set task log directory relative to config folder
         log_dir = os.path.join(os.path.dirname(config_path), "logs", "tasks")
@@ -52,8 +60,43 @@ class DeepGravityOrchestrator:
         # Failover routing — per-provider error state
         self._provider_errors = {}  # {provider_name: {"consecutive": N, "last_failure": epoch_sec}}
         self._current_provider_for_role = {}  # {role: active_provider_name}
+        self._last_working_provider = {}  # {role: provider_name} — last provider that responded successfully
         self._failover_config = self.config.get("api", {}).get("failover", {})
         self._failover_threshold = self.config.get("api", {}).get("failover_threshold", 3)
+        self._pending_approval = None  # set by web_server.py when a command is waiting for approval
+
+        # ── Idle Watchdog ──
+        from src.idle_watchdog import IdleWatchdog
+        wt_config = self.config.get("watchtower", {})
+        self.watchdog = IdleWatchdog(self, wt_config)
+        self.watchdog.start()
+        
+        # Check for idle snapshot on restart
+        snapshot = self.watchdog.check_snapshot_on_restart()
+        if snapshot:
+            idle_min = snapshot.get("idle_minutes", "?")
+            print(f"\n[Watchtower] ⏸️ Previous session ended after {idle_min} min of inactivity.")
+            print(f"[Watchtower] Session snapshot available in logs/idle_snapshot.json")
+
+        # ── Depth Dial (Phase 5.5: G-M-O-U-X) ──
+        self.depth_level = "S"  # default starting depth (Safe)
+        self._depth_warnings_given = set()  # track one-time warnings (e.g. O on public)
+
+        # ── Tool Result Cache (token bloat mitigation) ──
+        cache_dir = os.path.join(os.path.dirname(self.config_path), "logs", "tool_cache")
+        self.tool_cache = ToolResultCache(cache_dir)
+
+        # ── Keystore (X-mode encryption) ──
+        keystore.init_keystore(self.config_path)
+        self._keystore_unlocked = False
+        self._session_keys = {}  # {session_id: base64_encoded_key}
+        
+        # ── X-mode history swapping ──
+        self._plaintext_backup = []  # saved plaintext history when entering encrypted mode (U/X)
+        self._plaintext_session_id = None  # saved plaintext session ID when entering encrypted mode (U/X)
+        self._surface_state_path = os.path.join(os.path.dirname(self.config_path), "logs", "chats", ".surface_state.json")
+        # Recover plaintext backup pointer from crash (if any)
+        self._recover_surface_from_crash()
 
     def load_config(self, path: str) -> Dict[str, Any]:
         if not os.path.exists(path):
@@ -143,6 +186,361 @@ class DeepGravityOrchestrator:
         if provider_name in self._provider_errors:
             self._provider_errors[provider_name]["consecutive"] = 0
 
+    def _try_fallback_provider(self, role: str):
+        """
+        Called when the active provider for a role fails mid-conversation.
+        Tries failover providers (from config), then the last working provider.
+        Returns a working provider if found, or None if all are exhausted.
+        """
+        routing = self.config.get("api", {}).get("routing", {})
+        primary = routing.get(role)
+
+        # 1. Try failover providers from config
+        failover_list = self._failover_config.get(role, [])
+        for name in failover_list:
+            if name == self._current_provider_for_role.get(role):
+                continue  # skip the one that just failed
+            err_info = self._provider_errors.get(name, {"consecutive": 0})
+            if err_info["consecutive"] < self._failover_threshold:
+                provider = self.providers.get(name)
+                if provider:
+                    depth_gate = self.check_depth_gate(name)
+                    if depth_gate is None:
+                        self._current_provider_for_role[role] = name
+                        print(f"[DeepGravity] Agent-loop failover: {role} -> {name}")
+                        return provider
+
+        # 2. Try the last working provider (in case fallback was never explicitly configured)
+        last_working = self._last_working_provider.get(role)
+        if last_working and last_working != self._current_provider_for_role.get(role):
+            provider = self.providers.get(last_working)
+            if provider:
+                depth_gate = self.check_depth_gate(last_working)
+                if depth_gate is None:
+                    self._current_provider_for_role[role] = last_working
+                    print(f"[DeepGravity] Agent-loop fallback to last working: {role} -> {last_working}")
+                    return provider
+
+        return None
+
+    # ── Depth Dial Methods ───────────────────────────────────────────
+
+    VALID_DEPTH_LEVELS = {"S", "M", "A", "R", "T"}
+    DEPTH_ORDER = ["S", "M", "A", "R", "T"]
+
+    def set_depth_level(self, level: str) -> dict:
+        """
+        Set the current conversational depth level.
+        Returns a result dict with success/error info.
+        Enforces routing constraints: U/X require private providers.
+        """
+        level = level.upper()
+        if level not in self.VALID_DEPTH_LEVELS:
+            return {
+                "success": False,
+                "error": f"Invalid depth level '{level}'. Must be one of: S, M, A, R, T"
+            }
+
+        # R and T require at least one private provider configured
+        if level in ("R", "T"):
+            private_providers = self.get_private_providers()
+            if not private_providers:
+                return {
+                    "success": False,
+                    "level": level,
+                    "error": "This depth requires a local/private engine. No private providers are configured.",
+                    "private_providers": []
+                }
+
+        # Check that at least one routed provider can handle this depth
+        routing = self.config.get("api", {}).get("routing", {})
+        can_handle = False
+        seen = set()
+        for role, provider_name in routing.items():
+            if provider_name in seen:
+                continue
+            seen.add(provider_name)
+            max_d = self.get_max_depth_for_provider(provider_name)
+            if self.DEPTH_ORDER.index(level) <= self.DEPTH_ORDER.index(max_d):
+                can_handle = True
+                break
+
+        if not can_handle:
+            return {
+                "success": False,
+                "level": level,
+                "error": (
+                    f"No active provider supports depth level '{level}'. "
+                    f"Configure a provider with appropriate max_depth, or lower the depth."
+                )
+            }
+        
+        old_level = self.depth_level
+        self.depth_level = level  # SET FIRST so save_conversation_history() sees correct depth
+        
+        # ── History swap when crossing the T threshold ──
+        entering_encrypted = (level == "T" and old_level != "T" and self._keystore_unlocked)
+        leaving_encrypted = (old_level == "T" and level != "T")
+        
+        if entering_encrypted:
+            # Save current plaintext history
+            self._plaintext_backup = list(self.conversation_history)
+            self._plaintext_session_id = self.current_session_id
+            self._save_surface_state()
+            self.save_conversation_history()  # flush plaintext to disk
+            # Start fresh encrypted session
+            import uuid
+            self.conversation_history = [self.conversation_history[0]]  # keep system prompt
+            self.current_session_id = f"chat_{time.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:4]}"
+            self.save_conversation_history()  # write initial encrypted frame
+        elif leaving_encrypted:
+            # Save encrypted session
+            self.save_conversation_history()
+            # Restore plaintext
+            if self._plaintext_backup:
+                self.conversation_history = self._plaintext_backup
+                self.current_session_id = self._plaintext_session_id
+                self._plaintext_backup = []
+                self._plaintext_session_id = None
+                self._delete_surface_state()
+            else:
+                # No backup — start a fresh plaintext session
+                import uuid
+                self.conversation_history = [self.conversation_history[0]]  # keep system prompt
+                self.current_session_id = f"chat_{time.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:4]}"
+            self.save_conversation_history()
+
+        result = {
+            "success": True,
+            "level": level,
+            "private_providers": self.get_private_providers(),
+            "keystore_unlocked": self._keystore_unlocked
+        }
+        if entering_encrypted or leaving_encrypted:
+            result["surface_swapped"] = True
+            result["new_session_id"] = self.current_session_id
+        return result
+
+    def ensure_surface_swap(self) -> bool:
+        """
+        Retroactively fire the plaintext→encrypted surface swap if it was missed.
+        Happens when keystore is set up/unlocked AFTER depth was already set to X.
+        Returns True if a swap was performed, False if not needed.
+        """
+        if self.depth_level == "T" and self._keystore_unlocked and not self._plaintext_backup:
+            import uuid
+            self._plaintext_backup = list(self.conversation_history)
+            self._plaintext_session_id = self.current_session_id
+            self._save_surface_state()
+            self.save_conversation_history()
+            self.conversation_history = [self.conversation_history[0]]
+            self.current_session_id = f"chat_{time.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:4]}"
+            self.save_conversation_history()
+            return True
+        return False
+
+    def _save_surface_state(self):
+        """Persist plaintext backup pointer so it survives crashes."""
+        if self._plaintext_session_id:
+            try:
+                os.makedirs(os.path.dirname(self._surface_state_path), exist_ok=True)
+                state = {"depth": self.depth_level, "plaintext_session_id": self._plaintext_session_id}
+                with open(self._surface_state_path, "w", encoding="utf-8") as f:
+                    json.dump(state, f)
+            except Exception as e:
+                print(f"[DeepGravity] Failed to save surface state: {e}")
+
+    def _delete_surface_state(self):
+        """Remove the crash-recovery state file."""
+        try:
+            if os.path.exists(self._surface_state_path):
+                os.remove(self._surface_state_path)
+        except Exception:
+            pass
+
+    def _recover_surface_from_crash(self):
+        """On startup, check if a crash left an orphaned surface state."""
+        if not os.path.exists(self._surface_state_path):
+            return
+        try:
+            with open(self._surface_state_path, "r", encoding="utf-8") as f:
+                state = json.load(f)
+            sid = state.get("plaintext_session_id")
+            depth = state.get("depth", "S")
+            if sid and depth in self.VALID_DEPTH_LEVELS:
+                # Restore the plaintext backup pointer
+                self._plaintext_session_id = sid
+                self.depth_level = depth
+                print(f"[DeepGravity] Recovered surface state from crash: depth={depth}, session={sid}")
+            # Delete the state file regardless — it's consumed on recovery
+            self._delete_surface_state()
+        except Exception as e:
+            print(f"[DeepGravity] Failed to recover surface state: {e}")
+            self._delete_surface_state()
+
+    def get_depth_level(self) -> str:
+        """Return the current depth level."""
+        return self.depth_level
+
+    def get_max_depth_for_provider(self, provider_name: str) -> str:
+        """
+        Return the maximum depth level a provider can handle.
+        Checks explicit 'max_depth' in config, then falls back to defaults:
+        - public providers default to 'O'
+        - private providers (public_stratum=false) default to 'X'
+        """
+        providers_config = self.config.get("api", {}).get("providers", {})
+        prov_cfg = providers_config.get(provider_name, {})
+
+        # Explicit max_depth in config
+        max_depth = prov_cfg.get("max_depth")
+        if max_depth and max_depth in self.VALID_DEPTH_LEVELS:
+            return max_depth
+
+        # Default logic: private providers default to X, public to O
+        is_public = prov_cfg.get("public_stratum", True)
+        if is_public:
+            return "A"
+        else:
+            return "T"
+
+    def get_depth_state(self) -> dict:
+        """Return full depth state for API responses."""
+        return {
+            "level": self.depth_level,
+            "private_providers": self.get_private_providers(),
+            "keystore_unlocked": self._keystore_unlocked
+        }
+
+    def check_depth_gate(self, provider_name: str, level: str = None) -> Optional[str]:
+        """
+        Check if the given provider can handle the current (or specified) depth level.
+        Returns None if allowed, or an error message if blocked.
+        """
+        check_level = level or self.depth_level
+        max_d = self.get_max_depth_for_provider(provider_name)
+
+        if self.DEPTH_ORDER.index(check_level) > self.DEPTH_ORDER.index(max_d):
+            return (
+                f"Depth level '{check_level}' exceeds provider '{provider_name}' "
+                f"maximum of '{max_d}'. Switch to a provider with higher max_depth, "
+                f"or reduce the depth level."
+            )
+        return None
+
+    # ── Keystore Methods ─────────────────────────────────────────────
+
+    def get_keystore_status(self) -> dict:
+        """Return keystore existence and unlock state."""
+        return {
+            "exists": keystore.keystore_exists(),
+            "unlocked": self._keystore_unlocked
+        }
+
+    def setup_keystore(self, passphrase: str) -> dict:
+        """
+        Create a new keystore with the given master passphrase.
+        Returns result dict with recovery phrase on success.
+        """
+        if keystore.keystore_exists():
+            return {"success": False, "error": "Keystore already exists. Use POST /api/keystore/unlock to unlock it."}
+        try:
+            result = keystore.create_keystore(passphrase)
+            self._keystore_unlocked = True
+            swapped = self.ensure_surface_swap()
+            response = {"success": True, "recovery_phrase": result["recovery_phrase"], "warning": result["warning"]}
+            if swapped:
+                response["surface_swapped"] = True
+                response["new_session_id"] = self.current_session_id
+            return response
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def unlock_keystore(self, passphrase_or_phrase: str, is_recovery: bool = False) -> dict:
+        """
+        Unlock the keystore with a passphrase or recovery phrase.
+        Returns success/failure.
+        """
+        if not keystore.keystore_exists():
+            return {"success": False, "error": "No keystore found. Create one with POST /api/keystore/setup first."}
+
+        try:
+            if is_recovery:
+                sessions = keystore.unlock_keystore_with_recovery(passphrase_or_phrase)
+            else:
+                sessions = keystore.unlock_keystore(passphrase_or_phrase)
+
+            if sessions is not None:
+                self._keystore_unlocked = True
+                self._session_keys = sessions
+                swapped = self.ensure_surface_swap()
+                response = {"success": True}
+                if swapped:
+                    response["surface_swapped"] = True
+                    response["new_session_id"] = self.current_session_id
+                return response
+            else:
+                self._keystore_unlocked = False
+                return {"success": False, "error": "Incorrect passphrase or recovery phrase."}
+        except Exception as e:
+            self._keystore_unlocked = False
+            return {"success": False, "error": str(e)}
+
+    def lock_keystore(self):
+        """Lock the keystore (clear in-memory session keys and active master key)."""
+        self._keystore_unlocked = False
+        self._session_keys = {}
+        self._plaintext_backup = []
+        self._plaintext_session_id = None
+        self._delete_surface_state()
+        keystore.clear_active_key()
+
+    def _load_model_privacy(self) -> dict:
+        """Load model-level privacy registry from YAML."""
+        try:
+            import yaml
+            privacy_path = os.path.join(os.path.dirname(self.config_path), "config", "model_privacy.yaml")
+            if os.path.exists(privacy_path):
+                with open(privacy_path, "r", encoding="utf-8") as f:
+                    data = yaml.safe_load(f)
+                    if data and "models" in data:
+                        return data["models"]
+            return {}
+        except Exception:
+            return {}
+
+    def is_model_private(self, model_name: str) -> bool:
+        """Check if a specific model is classified as private in the registry."""
+        registry = self._load_model_privacy()
+        entry = registry.get(model_name, {})
+        if isinstance(entry, dict) and entry.get("stratum") == "private":
+            return True
+        return False
+
+    def get_private_providers(self) -> List[str]:
+        """Return list of provider names where public_stratum is false (local/private)."""
+        providers_config = self.config.get("api", {}).get("providers", {})
+        private = []
+        for name, cfg in providers_config.items():
+            if not cfg.get("public_stratum", True):
+                private.append(name)
+        return private
+
+    def get_public_providers(self) -> List[str]:
+        """Return list of provider names where public_stratum is true (cloud/public)."""
+        providers_config = self.config.get("api", {}).get("providers", {})
+        public = []
+        for name, cfg in providers_config.items():
+            if cfg.get("public_stratum", True):
+                public.append(name)
+        return public
+
+    def is_public_provider(self, provider_name: str) -> bool:
+        """Return True if the provider routes through a third-party public stratum."""
+        providers_config = self.config.get("api", {}).get("providers", {})
+        prov_cfg = providers_config.get(provider_name, {})
+        return prov_cfg.get("public_stratum", True)  # default to public if unset
+
     def provider_supports_tools(self, role: str) -> bool:
         routing = self.config.get("api", {}).get("routing", {})
         provider_name = routing.get(role)
@@ -190,6 +588,14 @@ class DeepGravityOrchestrator:
             prompt_parts.append(f"=== COLLABORATION RULES ===\n{user_rules}")
         if active_braid:
             prompt_parts.append(f"=== ACTIVE WORKSPACE STATE (ACTIVE BRAID) ===\n{active_braid}")
+
+        # 4. Tool Cache instruction
+        cache_instruction = (
+            "You have a tool result cache. When you see [CACHED:<ref_id>] in a tool message, "
+            "the full result is stored on disk. Use the read_cache tool to retrieve it if "
+            "you need the complete data. Otherwise, the pointer summary is sufficient context."
+        )
+        prompt_parts.append(f"=== TOOL CACHE ===\n{cache_instruction}")
 
         self.system_prompt = "\n\n".join(prompt_parts)
         return self.system_prompt
@@ -348,8 +754,66 @@ class DeepGravityOrchestrator:
                     truncate_content=args.get("truncate_content", 250)
                 )
                 result = json.dumps(grep_result, indent=2)
+            elif name == "web_search":
+                search_result = self.web_search.search(
+                    query=args["query"],
+                    max_results=args.get("max_results", 8)
+                )
+                result = json.dumps(search_result, indent=2)
+            elif name == "analyze_image":
+                img_result = self.vision.analyze_image(
+                    image_path=args["image_path"],
+                    prompt=args.get("prompt", "Describe this image in detail.")
+                )
+                if img_result.get("error"):
+                    result = f"Error: {img_result['error']}"
+                elif img_result.get("_multimodal_messages"):
+                    result = img_result
+                else:
+                    result = img_result.get("description", "No result")
+            elif name == "analyze_image_from_url":
+                img_result = self.vision.analyze_image_from_url(
+                    image_url=args["image_url"],
+                    prompt=args.get("prompt", "Describe this image in detail.")
+                )
+                if img_result.get("error"):
+                    result = f"Error: {img_result['error']}"
+                elif img_result.get("_multimodal_messages"):
+                    result = img_result
+                else:
+                    result = img_result.get("description", "No result")
+            elif name == "read_cache":
+                ref_id = args.get("ref_id", "")
+                cached = self.tool_cache.retrieve(ref_id)
+                if cached is not None:
+                    result = cached
+                else:
+                    result = f"[CACHE MISS] No cached result for ref_id '{ref_id}'."
             else:
                 result = f"Error: Tool '{name}' is not recognized."
+            
+            # Multimodal tool result: send through current provider
+            if isinstance(result, dict) and result.get("_multimodal_messages"):
+                try:
+                    dialogue = self.get_provider_for_role("attunement_core")
+                    coder = self.get_provider_for_role("primary_orchestrator")
+                    provider = dialogue or coder
+                    if provider:
+                        img_content, _, _ = provider.generate_response(
+                            result["_multimodal_messages"]
+                        )
+                        result = img_content or "(no description returned)"
+                    else:
+                        result = "Error: No provider available for vision analysis."
+                except Exception as e:
+                    result = f"Error analyzing image: {e}"
+            
+            # ── Tool Result Cache ──
+            # Cache large string results and replace with a pointer
+            if isinstance(result, str) and len(result) >= 1024 and name != "read_cache":
+                ref_id = self.tool_cache.store(name, args, result)
+                if ref_id is not None:
+                    result = self.tool_cache.make_pointer(ref_id, name, args, len(result))
             
             # Record result for contract spinning detection
             self.contract_monitor.record_result(name, args, result)
@@ -464,6 +928,8 @@ class DeepGravityOrchestrator:
                 "history_len": len(self.conversation_history),
                 "session": getattr(self, "current_session_id", None),
                 "pid": os.getpid(),
+                "pending_approval": self._pending_approval,
+                "watchdog": self.watchdog.get_status() if hasattr(self, "watchdog") else None,
                 "providers": {
                     role: {
                         "provider": name,
@@ -508,6 +974,17 @@ class DeepGravityOrchestrator:
         active_role = "attunement_core" if active_provider == dialogue_provider else "primary_orchestrator"
         tools_to_expose = self.tools_schema if self.provider_supports_tools(active_role) else None
 
+        # ── Depth Dial Gate (non-streaming) ──
+        active_provider_name = self._current_provider_for_role.get(active_role, "unknown")
+        depth_gate_result = self.check_depth_gate(active_provider_name)
+        if depth_gate_result is not None:
+            self.conversation_history.append({
+                "role": "assistant",
+                "content": f"⚠️ DEPTH GATE\n\n{depth_gate_result}"
+            })
+            self.save_conversation_history()
+            return f"\n\n*{depth_gate_result}*\n\n"
+
         while True:
             self._loop_count += 1
             self._write_heartbeat("processing")
@@ -520,10 +997,18 @@ class DeepGravityOrchestrator:
                     tools=tools_to_expose
                 )
                 self.record_provider_success(provider_name)
+                self._last_working_provider[active_role] = provider_name
             except Exception as e:
                 self.record_provider_error(provider_name)
                 print(f"[DeepGravity] Provider error ({provider_name}): {e}")
-                raise  # let the outer loop handle retry/failover
+                # Try fallback providers before giving up
+                fallback = self._try_fallback_provider(active_role)
+                if fallback:
+                    print(f"[DeepGravity] Retrying with fallback provider for role {active_role}")
+                    active_provider = fallback
+                    provider_name = self._current_provider_for_role.get(active_role, "unknown")
+                    continue
+                raise  # all fallbacks exhausted
 
             assistant_msg = {"role": "assistant"}
             if content:
@@ -545,6 +1030,7 @@ class DeepGravityOrchestrator:
                 func = tool_call["function"]
                 self._last_tool_name = func["name"]
                 self._write_heartbeat("tool_exec")
+                self.save_conversation_history()  # persist before risky tool call
                 tool_result = self.execute_tool(func["name"], json.loads(func["arguments"]))
                 
                 self.conversation_history.append({
@@ -596,6 +1082,24 @@ class DeepGravityOrchestrator:
         active_role = "attunement_core" if active_provider == dialogue_provider else "primary_orchestrator"
         tools_to_expose = self.tools_schema if self.provider_supports_tools(active_role) else None
 
+        # Resolve provider name and config for gate checks
+        providers_config = self.config.get("api", {}).get("providers", {})
+        active_provider_name = self._current_provider_for_role.get(active_role, "unknown")
+        active_model_name = providers_config.get(active_provider_name, {}).get("model", "")
+
+        # ── Depth Dial Gate ──
+        # Check if the active provider can handle the current depth level
+        depth_gate_result = self.check_depth_gate(active_provider_name)
+        if depth_gate_result is not None:
+            self.conversation_history.append({
+                "role": "assistant",
+                "content": f"⚠️ DEPTH GATE\n\n{depth_gate_result}"
+            })
+            self.save_conversation_history()
+            yield {"type": "content", "content": f"\n\n*{depth_gate_result}*\n\n"}
+            self._write_heartbeat("idle")
+            return
+
         # Reset stop flag at start of execution
         self._stop_requested = False
 
@@ -618,9 +1122,17 @@ class DeepGravityOrchestrator:
             try:
                 stream = active_provider.generate_stream(self.conversation_history, tools=tools_to_expose)
                 self.record_provider_success(provider_name)
+                self._last_working_provider[active_role] = provider_name
             except Exception as e:
                 self.record_provider_error(provider_name)
                 print(f"[DeepGravity] Provider stream error ({provider_name}): {e}")
+                # Try fallback providers before giving up
+                fallback = self._try_fallback_provider(active_role)
+                if fallback:
+                    print(f"[DeepGravity] Retrying streaming with fallback provider for role {active_role}")
+                    active_provider = fallback
+                    provider_name = self._current_provider_for_role.get(active_role, "unknown")
+                    continue
                 yield {"type": "error", "content": f"Provider error: {e}"}
                 return
             
@@ -705,6 +1217,7 @@ class DeepGravityOrchestrator:
                 self._write_heartbeat("tool_exec")
                 yield {"type": "tool_start", "name": func["name"], "arguments": func["arguments"]}
                 
+                self.save_conversation_history()  # persist before risky tool call
                 try:
                     args = json.loads(func["arguments"])
                     tool_result = self.execute_tool(func["name"], args)
@@ -757,24 +1270,84 @@ class DeepGravityOrchestrator:
                         print(f"[DeepGravity] Failed to read backup credential from {backup_path}: {e}")
         return None
 
+    @staticmethod
+    def _safe_json_dumps(obj):
+        """
+        JSON-serialize an object, falling back to string coercion for
+        any non-serializable types. Prevents zero-byte tmp files from
+        serialization failures that leave orphaned stubs.
+        """
+        def _sanitize(o, _depth=0):
+            if _depth > 20:
+                return "<max recursion depth>"
+            if isinstance(o, (str, int, float, bool, type(None))):
+                return o
+            if isinstance(o, dict):
+                return {str(k): _sanitize(v, _depth + 1) for k, v in o.items()}
+            if isinstance(o, (list, tuple, set)):
+                return [_sanitize(i, _depth + 1) for i in o]
+            # bytes, callable, cyclic, etc. — coerce to string
+            try:
+                return str(o)
+            except Exception:
+                return "<unserializable object>"
+        try:
+            return json.dumps(obj, indent=2, default=str)
+        except (TypeError, ValueError):
+            return json.dumps(_sanitize(obj), indent=2)
+
     def save_conversation_history(self):
         """
         Saves the conversation history to a local JSON file in the logs directory.
+        If depth is U or X and keystore is unlocked, encrypts at rest with AES-256-GCM
+        using a per-session key stored in the in-memory keyring.
+        Uses atomic tmp-file + rename to prevent truncation on write failure.
         """
         if not hasattr(self, "current_session_id") or not self.current_session_id:
             return
         chat_dir = os.path.join(os.path.dirname(self.config_path), "logs", "chats")
         os.makedirs(chat_dir, exist_ok=True)
         file_path = os.path.join(chat_dir, f"{self.current_session_id}.json")
+        tmp_path = file_path + ".tmp"
         try:
-            with open(file_path, "w", encoding="utf-8") as f:
-                json.dump(self.conversation_history, f, indent=2)
+            # T-mode encryption pipeline
+            if self.depth_level == "T" and self._keystore_unlocked:
+                plaintext = self._safe_json_dumps(self.conversation_history)
+                # Generate or retrieve session key
+                sess_key_b64 = self._session_keys.get(self.current_session_id)
+                if sess_key_b64:
+                    session_key = base64.b64decode(sess_key_b64)
+                else:
+                    session_key = keystore.generate_session_key()
+                    self._session_keys[self.current_session_id] = base64.b64encode(session_key).decode()
+                    keystore.add_session_key(self.current_session_id, session_key)
+                # Encrypt and write to tmp, then atomic rename
+                wrapped = keystore.encrypt_session_data(plaintext, session_key)
+                wrapped["session_id"] = self.current_session_id
+                with open(tmp_path, "w", encoding="utf-8") as f:
+                    json.dump(wrapped, f)
+                os.replace(tmp_path, file_path)
+            else:
+                # Plaintext save (G/M/O or keystore locked) — serialize, write to tmp, atomic rename
+                serialized = self._safe_json_dumps(self.conversation_history)
+                with open(tmp_path, "w", encoding="utf-8") as f:
+                    f.write(serialized)
+                os.replace(tmp_path, file_path)
         except Exception as e:
-            print(f"[DeepGravity] Failed to save conversation history: {e}")
+            print(f"[DeepGravity] FAILED TO SAVE CONVERSATION HISTORY: {e}")
+            traceback.print_exc()
+            # Clean up orphaned tmp file on failure so it doesn't poison future saves
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except Exception:
+                pass
 
     def load_session(self, session_id: str) -> bool:
         """
         Loads a specific conversation history from logs/chats/<session_id>.json.
+        If the file contains an _encrypted wrapper, decrypts using the session key
+        from the in-memory keyring (requires keystore to be unlocked).
         """
         chat_dir = os.path.join(os.path.dirname(self.config_path), "logs", "chats")
         file_path = os.path.join(chat_dir, f"{session_id}.json")
@@ -782,7 +1355,28 @@ class DeepGravityOrchestrator:
             return False
         try:
             with open(file_path, "r", encoding="utf-8") as f:
-                history = json.load(f)
+                data = json.load(f)
+
+            # Detect encrypted session
+            if isinstance(data, dict) and data.get("_encrypted"):
+                if not self._keystore_unlocked:
+                    print(f"[DeepGravity] Cannot load encrypted session {session_id}: keystore locked.")
+                    return False
+                # Retrieve session key from keyring
+                sess_key_b64 = self._session_keys.get(session_id)
+                if not sess_key_b64:
+                    print(f"[DeepGravity] Cannot load encrypted session {session_id}: session key not in keyring.")
+                    return False
+                session_key = base64.b64decode(sess_key_b64)
+                plaintext = keystore.decrypt_session_data(data, session_key)
+                if plaintext is None:
+                    print(f"[DeepGravity] Failed to decrypt session {session_id}.")
+                    return False
+                history = json.loads(plaintext)
+            else:
+                # Plaintext session
+                history = data
+
             # Re-hydrate system prompt in case the config rules have changed
             self.hydrate_system_prompt()
             if history and history[0].get("role") == "system":
@@ -796,11 +1390,16 @@ class DeepGravityOrchestrator:
 
     def list_sessions(self) -> List[Dict[str, Any]]:
         """
-        Lists all saved chat sessions with titles, timestamps, and last assistant responses.
+        Lists saved chat sessions gated by encryption stratum.
+        U/X-mode (keystore unlocked) shows only encrypted sessions.
+        All other modes show only plaintext sessions.
         """
         chat_dir = os.path.join(os.path.dirname(self.config_path), "logs", "chats")
         if not os.path.exists(chat_dir):
             return []
+        
+        show_encrypted = (self.depth_level == "T" and self._keystore_unlocked)
+        
         sessions = []
         for fname in os.listdir(chat_dir):
             if fname.endswith(".json"):
@@ -810,10 +1409,19 @@ class DeepGravityOrchestrator:
                     mtime = os.path.getmtime(file_path)
                     formatted_time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(mtime))
                     with open(file_path, "r", encoding="utf-8") as f:
-                        history = json.load(f)
+                        data = json.load(f)
                     
-                    title = "Empty Session"
-                    preview = ""
+                    # ── Stratum gate ──
+                    is_encrypted = isinstance(data, dict) and data.get("_encrypted")
+                    if show_encrypted and not is_encrypted:
+                        continue
+                    if not show_encrypted and is_encrypted:
+                        continue
+                    
+                    # Don't parse encrypted bodies for previews
+                    history = data if not is_encrypted else []
+                    title = "Encrypted Session" if is_encrypted else "Empty Session"
+                    preview = "" if is_encrypted else ""
                     for msg in history:
                         if msg.get("role") == "user":
                             title = msg.get("content", "")[:50].strip()
@@ -831,7 +1439,8 @@ class DeepGravityOrchestrator:
                         "time": formatted_time,
                         "timestamp": mtime,
                         "title": title,
-                        "preview": preview
+                        "preview": preview,
+                        "encrypted": is_encrypted
                     })
                 except Exception:
                     pass
