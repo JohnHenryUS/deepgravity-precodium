@@ -63,7 +63,11 @@ class OpenAICompatProvider(BaseLLMProvider):
             
             if role == "assistant":
                 content = msg_copy.get("content")
-                has_content = content is not None and str(content).strip() != ""
+                # Support multimodal content (list of content parts) and plain text
+                if isinstance(content, list):
+                    has_content = len(content) > 0
+                else:
+                    has_content = content is not None and str(content).strip() != ""
                 raw_tool_calls = msg_copy.get("tool_calls")
                 has_tools = isinstance(raw_tool_calls, list) and len(raw_tool_calls) > 0
                 
@@ -165,7 +169,11 @@ class OpenAICompatProvider(BaseLLMProvider):
             
             if role == "assistant":
                 content = msg_copy.get("content")
-                has_content = content is not None and str(content).strip() != ""
+                # Support multimodal content (list of content parts) and plain text
+                if isinstance(content, list):
+                    has_content = len(content) > 0
+                else:
+                    has_content = content is not None and str(content).strip() != ""
                 raw_tool_calls = msg_copy.get("tool_calls")
                 has_tools = isinstance(raw_tool_calls, list) and len(raw_tool_calls) > 0
                 

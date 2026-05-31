@@ -185,5 +185,85 @@
         "required": ["search_path", "query"]
       }
     }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "web_search",
+      "description": "Search the web via DuckDuckGo. No API key required. Returns snippets and URLs.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "The search query string."
+          },
+          "max_results": {
+            "type": "integer",
+            "description": "Maximum results to return (1-15, default 8)."
+          }
+        },
+        "required": ["query"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "analyze_image",
+      "description": "Analyze a local image file using the current provider's vision capabilities.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "image_path": {
+            "type": "string",
+            "description": "Absolute path to the image file on disk."
+          },
+          "prompt": {
+            "type": "string",
+            "description": "Optional text prompt to guide the analysis. Defaults to 'Describe this image in detail.'"
+          }
+        },
+        "required": ["image_path"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "analyze_image_from_url",
+      "description": "Analyze an image from a remote URL using the current provider's vision capabilities.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "image_url": {
+            "type": "string",
+            "description": "URL to an image on the web."
+          },
+          "prompt": {
+            "type": "string",
+            "description": "Optional text prompt to guide the analysis. Defaults to 'Describe this image in detail.'"
+          }
+        },
+        "required": ["image_url"]
+      }
+    }
+  },
+  {
+    "type": "function",
+    "function": {
+      "name": "read_cache",
+      "description": "Retrieve the full content of a cached tool result by reference ID. Use when you need the complete data behind a [CACHED:...] pointer.",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "ref_id": {
+            "type": "string",
+            "description": "The reference ID from a [CACHED:...] pointer (e.g., 'a1b2c3d4')"
+          }
+        },
+        "required": ["ref_id"]
+      }
+    }
   }
 ]

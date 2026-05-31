@@ -42,32 +42,59 @@ active_websocket: Optional[WebSocket] = None
 active_loop: Optional[asyncio.AbstractEventLoop] = None
 active_log_websockets = set()
 
+# Persistent global queues and worker thread — survives WebSocket reconnections
+global_msg_queue = queue.Queue()
+global_approval_queue = queue.Queue()
+global_worker_thread = None
+
 # ── Resilient approval fallbacks ────────────────────────────────────
 # When a WebSocket disconnects mid-tool-call, these replace the live
 # callbacks so the safety layer waits for reconnection instead of
 # falling through to CLI input().
 
-REASONABLE_TIMEOUT = 45.0  # seconds to wait for WS reconnection
+# Timeout for waiting on user approval via WebSocket.
+# Set long enough that slow rigs and brief disconnects don't silently kill commands.
+# If the timeout expires, the command is denied and a warning is logged.
+APPROVAL_TIMEOUT = 300.0  # seconds (5 min) — ample time for slow rigs and brief disconnects
+_approval_pending_since = None  # timestamp when a command started waiting for approval
+_pending_command_desc = ""       # truncated description of the pending command
 
 def _wait_for_reconnect() -> bool:
-    """Poll for a new WebSocket connection. Returns True if connected within timeout."""
+    """Poll for a new WebSocket connection. Reports progress to logs periodically."""
+    global _approval_pending_since, _pending_command_desc
     waited = 0.0
     step = 0.5
-    while waited < REASONABLE_TIMEOUT:
+    _approval_pending_since = time.time()
+    last_report = 0.0
+    while waited < APPROVAL_TIMEOUT:
         ws = active_websocket
         q = active_approval_queue
         if ws is not None and q is not None:
+            _approval_pending_since = None
+            _pending_command_desc = ""
             return True
-        import time
         time.sleep(step)
         waited += step
+        # Print progress every 15 seconds so the user sees it in the Logs tab
+        if waited - last_report >= 15.0:
+            last_report = waited
+            print(f"[DeepGravity] ⏳ Approval pending for {waited:.0f}s — waiting for WebSocket connection... ({_pending_command_desc})")
+    print(f"[DeepGravity] WARNING: WebSocket approval timed out after {APPROVAL_TIMEOUT}s. Command denied: {_pending_command_desc}")
+    _approval_pending_since = None
+    _pending_command_desc = ""
     return False
 
 def _resilient_cmd_approval(command: str, cwd: str) -> bool:
+    global _pending_command_desc
+    _pending_command_desc = f"cmd: {command[:120]}"
+    orchestrator._pending_approval = _pending_command_desc
     if not _wait_for_reconnect():
+        print(f"[DeepGravity] Command denied (no WebSocket): {command[:200]}")
+        orchestrator._pending_approval = None
         return False  # timeout → safe-deny
     ws, q, lp = active_websocket, active_approval_queue, active_loop
     if ws is None or q is None or lp is None:
+        print(f"[DeepGravity] Command denied (null socket/queue/loop): {command[:200]}")
         return False
     asyncio.run_coroutine_threadsafe(
         ws.send_json({
@@ -79,15 +106,25 @@ def _resilient_cmd_approval(command: str, cwd: str) -> bool:
         lp
     )
     try:
-        return q.get(timeout=REASONABLE_TIMEOUT)
+        result = q.get(timeout=APPROVAL_TIMEOUT)
+        orchestrator._pending_approval = None
+        return result
     except Exception:
+        print(f"[DeepGravity] Command approval queue timeout. Denied: {command[:200]}")
+        orchestrator._pending_approval = None
         return False
 
 def _resilient_write_approval(file_path: str, old_content: str, new_content: str, is_new: bool = False) -> bool:
+    global _pending_command_desc
+    _pending_command_desc = f"write: {file_path[:120]}"
+    orchestrator._pending_approval = _pending_command_desc
     if not _wait_for_reconnect():
+        print(f"[DeepGravity] Write denied (no WebSocket): {file_path}")
+        orchestrator._pending_approval = None
         return False
     ws, q, lp = active_websocket, active_approval_queue, active_loop
     if ws is None or q is None or lp is None:
+        print(f"[DeepGravity] Write denied (null socket/queue/loop): {file_path}")
         return False
     diff = ""
     if not is_new:
@@ -112,8 +149,12 @@ def _resilient_write_approval(file_path: str, old_content: str, new_content: str
         lp
     )
     try:
-        return q.get(timeout=REASONABLE_TIMEOUT)
+        result = q.get(timeout=APPROVAL_TIMEOUT)
+        orchestrator._pending_approval = None
+        return result
     except Exception:
+        print(f"[DeepGravity] Write approval queue timeout. Denied: {file_path}")
+        orchestrator._pending_approval = None
         return False
 
 def _resilient_open_file(file_path: str) -> None:
@@ -125,6 +166,67 @@ def _resilient_open_file(file_path: str) -> None:
         ws.send_json({"type": "open_file", "path": file_path}),
         lp
     )
+
+# ── Model Privacy Registry (YAML) ───────────────────────────────────
+MODEL_PRIVACY_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "config", "model_privacy.yaml"))
+
+def _load_model_privacy() -> dict:
+    """Load the model privacy registry from YAML. Returns dict or empty."""
+    try:
+        import yaml
+        if os.path.exists(MODEL_PRIVACY_PATH):
+            with open(MODEL_PRIVACY_PATH, "r", encoding="utf-8") as f:
+                data = yaml.safe_load(f)
+                if data and "models" in data:
+                    return data["models"]
+        return {}
+    except ImportError:
+        return {}
+    except Exception:
+        return {}
+
+def _save_model_privacy_entry(model_name: str, stratum: str, source: str = ""):
+    """Add or update a model's privacy classification in the YAML file."""
+    try:
+        import yaml
+        data = {"models": {}}
+        if os.path.exists(MODEL_PRIVACY_PATH):
+            with open(MODEL_PRIVACY_PATH, "r", encoding="utf-8") as f:
+                existing = yaml.safe_load(f)
+                if existing and "models" in existing:
+                    data["models"] = existing["models"]
+        
+        data["models"][model_name] = {
+            "stratum": stratum,
+            "source": source
+        }
+        
+        os.makedirs(os.path.dirname(MODEL_PRIVACY_PATH), exist_ok=True)
+        with open(MODEL_PRIVACY_PATH, "w", encoding="utf-8") as f:
+            yaml.dump(data, f, default_flow_style=False, allow_unicode=True)
+        return True
+    except ImportError:
+        return False
+    except Exception:
+        return False
+
+@app.get("/api/model-privacy")
+def get_model_privacy():
+    """Return the current model privacy registry."""
+    return {"models": _load_model_privacy()}
+
+@app.post("/api/model-privacy")
+def set_model_privacy(req: dict):
+    """Register a model's privacy classification."""
+    model_name = req.get("model", "")
+    stratum = req.get("stratum", "public")  # "public" or "private"
+    source = req.get("source", "")
+    if not model_name:
+        raise HTTPException(status_code=400, detail="Model name required")
+    if stratum not in ("public", "private"):
+        raise HTTPException(status_code=400, detail="Stratum must be 'public' or 'private'")
+    ok = _save_model_privacy_entry(model_name, stratum, source)
+    return {"success": ok}
 
 def broadcast_log(message: str):
     if not active_log_websockets or not active_loop:
@@ -189,132 +291,76 @@ class TaskKillRequest(BaseModel):
     task_id: str
 
 
-def run_chat_worker(msg_queue: queue.Queue, loop: asyncio.AbstractEventLoop, websocket: WebSocket, approval_queue: queue.Queue):
+def run_chat_worker():
     """
-    Worker thread that pulls user messages from the queue and runs the orchestrator agent loop sequentially.
+    Persistent worker thread that pulls user messages from the global queue
+    and runs the orchestrator agent loop sequentially. Survives WebSocket
+    disconnections and reconnections via the global active_websocket reference.
     """
-    global orchestrator
-
-    def cmd_approval(command: str, cwd: str) -> bool:
-        # Send approval request to Web Client
-        asyncio.run_coroutine_threadsafe(
-            websocket.send_json({
-                "type": "approval_required",
-                "action": "command",
-                "command": command,
-                "cwd": cwd
-            }),
-            loop
-        )
-        # Block waiting for client response from main thread
-        approved = approval_queue.get()
-        return approved
-
-    def write_approval(file_path: str, old_content: str, new_content: str, is_new: bool = False) -> bool:
-        diff = ""
-        if not is_new:
-            old_lines = old_content.splitlines()
-            new_lines = new_content.splitlines()
-            diff_lines = difflib.unified_diff(
-                old_lines,
-                new_lines,
-                fromfile=f"a/{file_path}",
-                tofile=f"b/{file_path}",
-                lineterm=""
-            )
-            diff = "\n".join(diff_lines)
-
-        # Send approval request to Web Client
-        asyncio.run_coroutine_threadsafe(
-            websocket.send_json({
-                "type": "approval_required",
-                "action": "write",
-                "file_path": file_path,
-                "is_new": is_new,
-                "diff": diff,
-                "new_content_preview": new_content[:1500]
-            }),
-            loop
-        )
-        # Block waiting for client response from main thread
-        approved = approval_queue.get()
-        return approved
-
-    # Bind callbacks to safety guardrails
-    orchestrator.guardrails.command_approval_callback = cmd_approval
-    orchestrator.guardrails.write_approval_callback = write_approval
-
-    # Register callback so the orchestrator can push files to the editor
-    def open_file_callback(file_path: str):
-        asyncio.run_coroutine_threadsafe(
-            websocket.send_json({
-                "type": "open_file",
-                "path": file_path
-            }),
-            loop
-        )
-    orchestrator.guardrails.open_file_callback = open_file_callback
+    global orchestrator, active_websocket, active_loop, global_msg_queue
 
     try:
         while True:
-            user_text = msg_queue.get()
-            if user_text is None:  # Sentinel to exit
+            user_text = global_msg_queue.get()
+            if user_text is None:
                 break
             
             try:
                 # Run the streaming agent loop
                 stream = orchestrator.run_agent_loop_stream(user_text)
                 for chunk in stream:
-                    asyncio.run_coroutine_threadsafe(
-                        websocket.send_json({
-                            "type": "stream",
-                            "data": chunk
-                        }),
-                        loop
-                    )
+                    ws = active_websocket
+                    lp = active_loop
+                    if ws is not None and lp is not None:
+                        asyncio.run_coroutine_threadsafe(
+                            ws.send_json({
+                                "type": "stream",
+                                "data": chunk
+                            }),
+                            lp
+                        )
 
                 # Notify final session state
-                asyncio.run_coroutine_threadsafe(
-                    websocket.send_json({"type": "complete"}),
-                    loop
-                )
+                ws = active_websocket
+                lp = active_loop
+                if ws is not None and lp is not None:
+                    asyncio.run_coroutine_threadsafe(
+                        ws.send_json({"type": "complete"}),
+                        lp
+                    )
             except Exception as err:
-                asyncio.run_coroutine_threadsafe(
-                    websocket.send_json({"type": "error", "message": str(err)}),
-                    loop
-                )
+                ws = active_websocket
+                lp = active_loop
+                if ws is not None and lp is not None:
+                    asyncio.run_coroutine_threadsafe(
+                        ws.send_json({"type": "error", "message": str(err)}),
+                        lp
+                    )
             finally:
-                msg_queue.task_done()
-    finally:
-        # On disconnect: replace callbacks with resilient fallbacks that
-        # wait for WebSocket reconnection instead of falling through to CLI input().
-        orchestrator.guardrails.command_approval_callback = _resilient_cmd_approval
-        orchestrator.guardrails.write_approval_callback = _resilient_write_approval
-        orchestrator.guardrails.open_file_callback = _resilient_open_file
+                global_msg_queue.task_done()
+    except Exception as e:
+        print(f"[DeepGravity] Worker thread exception: {e}")
 
 @app.websocket("/ws/chat")
 async def websocket_chat(websocket: WebSocket):
-    global active_approval_queue, active_websocket, active_loop
+    global active_approval_queue, active_websocket, active_loop, global_worker_thread
     await websocket.accept()
     active_websocket = websocket
+    active_approval_queue = global_approval_queue
+    active_loop = asyncio.get_running_loop()
 
-    # Create thread-safe queue for this connection's approvals
-    approval_queue = queue.Queue()
-    active_approval_queue = approval_queue
+    # Bind resilient callbacks to the orchestrator on each connection
+    orchestrator.guardrails.command_approval_callback = _resilient_cmd_approval
+    orchestrator.guardrails.write_approval_callback = _resilient_write_approval
+    orchestrator.guardrails.open_file_callback = _resilient_open_file
 
-    # Create thread-safe queue for user messages
-    msg_queue = queue.Queue()
-
-    loop = asyncio.get_running_loop()
-    active_loop = loop
-
-    # Start single background worker thread for the session
-    worker_thread = threading.Thread(
-        target=run_chat_worker,
-        args=(msg_queue, loop, websocket, approval_queue),
-        daemon=True
-    )
-    worker_thread.start()
+    # Start persistent background worker thread if not already running
+    if global_worker_thread is None or not global_worker_thread.is_alive():
+        global_worker_thread = threading.Thread(
+            target=run_chat_worker,
+            daemon=True
+        )
+        global_worker_thread.start()
 
     try:
         while True:
@@ -325,6 +371,10 @@ async def websocket_chat(websocket: WebSocket):
             if msg_type == "user_message":
                 content = msg.get("content", "")
                 active_file = msg.get("active_file")
+                
+                # Ping the idle watchdog — user is active
+                if hasattr(orchestrator, "watchdog"):
+                    orchestrator.watchdog.ping_user_activity()
                 
                 # Context injection: if a file is open in the editor, inject its content into the user message context
                 if active_file:
@@ -341,27 +391,27 @@ async def websocket_chat(websocket: WebSocket):
 
                 if content.strip():
                     # Check if orchestrator is currently busy processing or has queued tasks
-                    if msg_queue.unfinished_tasks > 0:
+                    if global_msg_queue.unfinished_tasks > 0:
                         await websocket.send_json({
                             "type": "content",
                             "data": "\n\n*[Orchestrator is busy. Your message has been queued and will be processed once the current task clears...]*\n\n"
                         })
                     
-                    msg_queue.put(content)
+                    global_msg_queue.put(content)
 
             elif msg_type == "approval_response":
                 approved = msg.get("approved", False)
-                approval_queue.put(approved)
+                global_approval_queue.put(approved)
 
             elif msg_type == "stop_execution":
                 # Signal the orchestrator to halt the current agent loop
                 orchestrator._stop_requested = True
                 
                 # Flush all queued messages
-                while not msg_queue.empty():
+                while not global_msg_queue.empty():
                     try:
-                        msg_queue.get_nowait()
-                        msg_queue.task_done()
+                        global_msg_queue.get_nowait()
+                        global_msg_queue.task_done()
                     except queue.Empty:
                         break
 
@@ -370,16 +420,14 @@ async def websocket_chat(websocket: WebSocket):
                         "type": "content",
                         "data": "[Stop signal sent. Queued messages cleared.]"
                     }),
-                    loop
+                    active_loop
                 )
 
     except WebSocketDisconnect:
         # Unblock thread if it was waiting for approval
-        approval_queue.put(False)
-        # Shutdown worker thread
-        msg_queue.put(None)
+        global_approval_queue.put(False)
 
-        if active_approval_queue == approval_queue:
+        if active_approval_queue == global_approval_queue:
             active_approval_queue = None
         if active_websocket == websocket:
             active_websocket = None
@@ -809,6 +857,97 @@ def submit_feedback(fb: FeedbackRequest):
         return {"success": True}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# ── Depth Dial API ──────────────────────────────────────────────────
+
+class DepthRequest(BaseModel):
+    level: str
+
+@app.post("/api/depth")
+def set_depth(req: DepthRequest):
+    """Set the current conversational depth level (G/M/O/U/X)."""
+    result = orchestrator.set_depth_level(req.level)
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "Unknown error"))
+    return result
+
+@app.get("/api/depth")
+def get_depth():
+    """Get the current depth level state."""
+    return orchestrator.get_depth_state()
+
+# ── Heartbeat API ───────────────────────────────────────────────────
+
+import time as time_module
+
+# ── Watchtower EKG Dashboard ──
+
+@app.get("/watchtower")
+def get_watchtower():
+    watchtower_path = os.path.join(static_dir, "watchtower.html")
+    if os.path.exists(watchtower_path):
+        return FileResponse(watchtower_path)
+    return HTMLResponse("<h1>Watchtower not found</h1><p>watchtower.html is missing from static/</p>")
+
+@app.get("/api/heartbeat")
+def get_heartbeat():
+    """Return current orchestrator heartbeat for watchtower monitoring."""
+    hb_path = orchestrator._heartbeat_path
+    if not os.path.exists(hb_path):
+        return {"status": "dead", "error": "No heartbeat file. Orchestrator may not be running."}
+    try:
+        with open(hb_path, "r") as f:
+            hb = json.load(f)
+        # Calculate staleness
+        age = time_module.time() - hb.get("timestamp", 0)
+        hb["age_seconds"] = round(age, 1)
+        if age > 60:
+            hb["status"] = "stalled"
+        elif age > 300:
+            hb["status"] = "dead"
+        # Attach watchdog status
+        if hasattr(orchestrator, "watchdog"):
+            hb["watchdog"] = orchestrator.watchdog.get_status()
+        return hb
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
+
+# ── Keystore API ────────────────────────────────────────────────────
+
+class KeystoreSetupRequest(BaseModel):
+    passphrase: str
+
+class KeystoreUnlockRequest(BaseModel):
+    passphrase: str = ""
+    recovery_phrase: str = ""
+
+@app.post("/api/keystore/setup")
+def keystore_setup(req: KeystoreSetupRequest):
+    """Create a new keystore with a master passphrase. Returns recovery phrase."""
+    if not req.passphrase:
+        raise HTTPException(status_code=400, detail="Passphrase cannot be empty.")
+    result = orchestrator.setup_keystore(req.passphrase)
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "Unknown error"))
+    return result
+
+@app.post("/api/keystore/unlock")
+def keystore_unlock(req: KeystoreUnlockRequest):
+    """Unlock the keystore with a passphrase or recovery phrase."""
+    if req.recovery_phrase:
+        result = orchestrator.unlock_keystore(req.recovery_phrase, is_recovery=True)
+    elif req.passphrase:
+        result = orchestrator.unlock_keystore(req.passphrase, is_recovery=False)
+    else:
+        raise HTTPException(status_code=400, detail="Provide either passphrase or recovery_phrase.")
+    if not result.get("success"):
+        raise HTTPException(status_code=401, detail=result.get("error", "Unlock failed"))
+    return result
+
+@app.get("/api/keystore/status")
+def keystore_status():
+    """Check keystore existence and unlock state."""
+    return orchestrator.get_keystore_status()
 
 @app.get("/api/feedback")
 def get_feedback():

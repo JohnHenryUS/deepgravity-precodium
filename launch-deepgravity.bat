@@ -39,9 +39,18 @@ if exist "config.json" (
 if "%HOST%"=="0.0.0.0" set "HOST=127.0.0.1"
 set "DEEPGRAVITY_BACKEND_URL=http://%HOST%:%PORT%"
 
-echo  Workspace:   %WORKSPACE%
-echo  Extensions:  %~dp0extensions
+echo  Backend URL:  %DEEPGRAVITY_BACKEND_URL%
+echo  Workspace:    %WORKSPACE%
+echo  Extensions:   %~dp0extensions
 echo.
+
+rem --- Start Python backend ---
+set "BACKEND_SCRIPT=%~dp0src\ui\web_server.py"
+if exist "%BACKEND_SCRIPT%" (
+    echo  Starting backend...
+    start /B "" python "%BACKEND_SCRIPT%" > nul 2>&1
+    timeout /t 2 /nobreak > nul
+)
 
 rem Convert backslashes to forward slashes for folder URI
 set "URI_PATH=%WORKSPACE:\=/%"

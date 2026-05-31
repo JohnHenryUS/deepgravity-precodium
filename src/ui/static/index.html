@@ -225,6 +225,14 @@
                         <select id="engine-selector-embed" class="model-badge-select engine-selector-embed">
                             <option value="">Loading engine...</option>
                         </select>
+                        <div class="depth-dial" id="depth-dial">
+                            <button class="depth-btn active" data-depth="S" title="Safe. Warm, all-ages, general conversation.">🛡️ S</button>
+                            <button class="depth-btn" data-depth="M" title="Mature. Adult concepts, clinical taboo, Little Red Schoolbook.">☀️ M</button>
+                            <button class="depth-btn" data-depth="A" title="Adult. Most conversations, caution on public networks.">🔥 A</button>
+                            <button class="depth-btn" data-depth="R" title="Reserved. Private unencrypted. Not for public consumption.">🚪 R</button>
+                            <button class="depth-btn" data-depth="T" title="Trusted. Encrypted, sequestered, full sovereign space.">🔒 T</button>
+                        </div>
+                        <span class="encryption-badge" id="encryption-badge" title="Session encryption state">📄 Plaintext</span>
                     </div>
                     <div class="chat-input-row">
                         <textarea id="chat-input" placeholder="Type a message... (Shift+Enter for newline)" rows="1"></textarea>
@@ -334,7 +342,120 @@
             </div>
         </div>
     </div>
-    
+
+    <!-- Engine Privacy & Classification Gate Portal overlay -->
+    <div class="portal-overlay" id="privacy-gate-portal">
+        <div class="portal-card privacy-gate-card">
+            <div class="portal-header privacy-gate-header">
+                <div class="warning-badge privacy-gate-badge">
+                    <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+                    <span id="privacy-gate-title">ENGINE CLASSIFICATION GATE</span>
+                </div>
+                <div class="sub-alert">Interactive Engine Privacy Verification</div>
+            </div>
+            
+            <div class="portal-body">
+                <div class="meta-row">
+                    <span class="label">Engine Model:</span>
+                    <span class="value highlight-text" id="privacy-gate-engine-name">Loading...</span>
+                </div>
+                <div class="meta-row">
+                    <span class="label">Current Status:</span>
+                    <span class="value" id="privacy-gate-status-text">Loading...</span>
+                </div>
+                
+                <div class="privacy-gate-description" id="privacy-gate-desc" style="margin-top: 15px; font-size: 0.85rem; line-height: 1.55; color: var(--text-main); background: hsla(224, 25%, 3%, 0.7); border: 1px solid var(--border-color); border-radius: 6px; padding: 12px; font-family: var(--font-sans);">
+                    Loading description...
+                </div>
+            </div>
+            
+            <div class="portal-footer">
+                <button class="btn btn-secondary" id="privacy-gate-toggle-btn">Toggle Stratum</button>
+                <button class="btn btn-danger" id="privacy-gate-abort-btn">Abort Switch</button>
+                <button class="btn btn-success" id="privacy-gate-confirm-btn">Confirm & Use</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Keystore Setup Wizard Modal -->
+    <div class="portal-overlay" id="keystore-setup-portal">
+        <div class="portal-card">
+            <div class="portal-header">
+                <div class="warning-badge">
+                    <svg class="icon icon-alert" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+                    <span>🔐 X-MODE KEYSTORE SETUP</span>
+                </div>
+                <div class="sub-alert">Encryption at rest requires a master passphrase</div>
+            </div>
+            <div class="portal-body" id="keystore-setup-body">
+                <!-- Step 1: Passphrase entry -->
+                <div class="keystore-step" id="ks-step-1">
+                    <p>Enter a master passphrase to encrypt your X-mode sessions. <strong>This is not recoverable.</strong> There is no password reset.</p>
+                    <div class="settings-field">
+                        <label>Master Passphrase</label>
+                        <input type="password" id="ks-passphrase" class="settings-input" placeholder="Your master passphrase..." autocomplete="off" />
+                    </div>
+                    <div class="settings-field">
+                        <label>Confirm Passphrase</label>
+                        <input type="password" id="ks-passphrase-confirm" class="settings-input" placeholder="Confirm passphrase..." autocomplete="off" />
+                    </div>
+                    <div class="ks-error" id="ks-error-1"></div>
+                </div>
+                <!-- Step 2: Recovery phrase display -->
+                <div class="keystore-step" id="ks-step-2" style="display:none;">
+                    <p><strong>⚠️ YOU HAVE ONE CHANCE TO SAVE THIS PHRASE</strong></p>
+                    <p>Without this phrase, if you lose your passphrase, ALL ENCRYPTED SESSIONS ARE LOST FOREVER.</p>
+                    <div class="recovery-phrase-display" id="ks-recovery-phrase"></div>
+                    <div class="portal-footer" style="border:none; padding: 12px 0;">
+                        <button class="btn btn-secondary btn-sm" id="ks-show-again">Show again</button>
+                        <button class="btn btn-success btn-sm" id="ks-saved">I've saved it</button>
+                    </div>
+                </div>
+                <!-- Step 3: Confirmation -->
+                <div class="keystore-step" id="ks-step-3" style="display:none;">
+                    <p>Type word <strong id="ks-confirm-word">—</strong> from your recovery phrase to confirm you've recorded it.</p>
+                    <div class="settings-field">
+                        <input type="text" id="ks-confirm-input" class="settings-input" placeholder="Type the word shown above..." autocomplete="off" />
+                    </div>
+                    <div class="ks-error" id="ks-error-3"></div>
+                </div>
+            </div>
+            <div class="portal-footer">
+                <button class="btn btn-secondary" id="ks-cancel-btn">Cancel</button>
+                <button class="btn btn-success" id="ks-next-btn">Next</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Keystore Unlock Modal -->
+    <div class="portal-overlay" id="keystore-unlock-portal">
+        <div class="portal-card">
+            <div class="portal-header">
+                <div class="warning-badge">
+                    <svg class="icon icon-alert" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z"/></svg>
+                    <span>🔑 UNLOCK KEYSTORE</span>
+                </div>
+                <div class="sub-alert">X-mode requires an unlocked keystore</div>
+            </div>
+            <div class="portal-body">
+                <div class="settings-field" id="ku-passphrase-field">
+                    <label>Master Passphrase</label>
+                    <input type="password" id="ku-passphrase" class="settings-input" placeholder="Enter master passphrase..." autocomplete="off" />
+                </div>
+                <div class="settings-field" id="ku-recovery-field" style="display:none;">
+                    <label>Recovery Phrase</label>
+                    <input type="text" id="ku-recovery" class="settings-input" placeholder="Enter your 12-word recovery phrase..." autocomplete="off" />
+                </div>
+                <div class="ks-error" id="ku-error"></div>
+                <button class="btn btn-link btn-sm" id="ku-toggle-method">Use recovery phrase instead</button>
+            </div>
+            <div class="portal-footer">
+                <button class="btn btn-secondary" id="ku-cancel-btn">Cancel</button>
+                <button class="btn btn-success" id="ku-unlock-btn">Unlock</button>
+            </div>
+        </div>
+    </div>
+
     <script src="/static/app.js?v=1.0.2"></script>
 </body>
 </html>

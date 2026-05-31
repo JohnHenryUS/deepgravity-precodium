@@ -1,0 +1,112 @@
+models:
+  claude-3-haiku:
+    notes: Cloud-hosted — data leaves the machine
+    source: anthropic
+    stratum: public
+  claude-3-opus:
+    notes: Cloud-hosted — data leaves the machine
+    source: anthropic
+    stratum: public
+  claude-3-sonnet:
+    notes: Cloud-hosted — data leaves the machine
+    source: anthropic
+    stratum: public
+  claude-haiku-4-5-20251001:
+    source: openwebui-live
+    stratum: public
+  deepseek-chat:
+    notes: Cloud-hosted — data leaves the machine
+    source: deepseek
+    stratum: public
+  deepseek-v4-flash:
+    source: openwebui-live
+    stratum: public
+  deepseek-v4-pro:
+    notes: Cloud-hosted — data leaves the machine
+    source: deepseek
+    stratum: public
+  dolphin3:
+    notes: No 'Dora' in name — assumed public
+    source: ollama
+    stratum: public
+  dora:
+    notes: Local Dora model — runs entirely on local machine
+    source: ollama
+    stratum: private
+  dora-14b:
+    notes: Local Dora model — runs entirely on local machine
+    source: ollama
+    stratum: private
+  dora-14b-somatic:
+    source: openwebui-live
+    stratum: public
+  dora-32b:
+    notes: Local Dora model — runs entirely on local machine
+    source: ollama
+    stratum: private
+  dora-3b:latest:
+    source: openwebui-live
+    stratum: public
+  dora-70b:latest:
+    source: openwebui-live
+    stratum: public
+  dora-deepseek-4-flash:
+    source: openwebui-live
+    stratum: public
+  dora-deepseek-4-pro:
+    source: openwebui-live
+    stratum: private
+  dora-latest:
+    notes: Local Dora model — runs entirely on local machine
+    source: ollama
+    stratum: private
+  dora-somatic:
+    encrypt_only: true
+    notes: Somatic model — requires X-mode encryption at rest
+    source: ollama
+    stratum: private
+  gemma:
+    notes: No 'Dora' in name — assumed public
+    source: ollama
+    stratum: public
+  gpt-3.5-turbo:
+    notes: Cloud-hosted — data leaves the machine
+    source: openai
+    stratum: public
+  gpt-4:
+    notes: Cloud-hosted — data leaves the machine
+    source: openai
+    stratum: public
+  gpt-4-turbo:
+    source: openwebui-live
+    stratum: public
+  gpt-5.5-pro:
+    source: openwebui-live
+    stratum: public
+  llama3:
+    notes: No 'Dora' in name — assumed public
+    source: ollama
+    stratum: public
+  llama3:latest:
+    notes: No 'Dora' in name — assumed public
+    source: ollama
+    stratum: public
+  mistral:
+    notes: No 'Dora' in name — assumed public
+    source: ollama
+    stratum: public
+  models/deep-research-max-preview-04-2026:
+    source: openwebui-live
+    stratum: public
+  phi:
+    notes: No 'Dora' in name — assumed public
+    source: ollama
+    stratum: public
+  qwen:
+    notes: No 'Dora' in name — assumed public
+    source: ollama
+    stratum: public
+  qwen2.5:
+    notes: No 'Dora' in name — assumed public
+    source: ollama
+    stratum: public
